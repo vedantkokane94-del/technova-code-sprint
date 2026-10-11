@@ -1,0 +1,57 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --svit-red: #B3122B;
+  --svit-red-dark: #8B0D20;
+  --svit-red-light: #D9233F;
+  --svit-cream: #FCF9F2;
+  --svit-cream-card: #FFFFFF;
+  --svit-cream-dark: #F5EFEB;
+  --svit-border: #E8DEC8;
+  color-scheme: light;
+}
+
+.dark {
+  --svit-cream: #0F1115;
+  --svit-cream-card: #181B20;
+  --svit-cream-dark: #22262E;
+  --svit-border: #2E3440;
+  color-scheme: dark;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+  background-color: var(--svit-cream);
+  color: #1A1A1A;
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+}
+
+.dark body {
+  color: #E2E8F0;
+}
+
+/* Watermark utility */
+.watermark-overlay {
+  pointer-events: none;
+  user-select: none;
+  background-image: repeating-linear-gradient(
+    -45deg,
+    rgba(179, 18, 43, 0.04) 0px,
+    rgba(179, 18, 43, 0.04) 20px,
+    transparent 20px,
+    transparent 120px
+  );
+}
+
+/* Integrity styling: prevent selection where desired */
+.no-copy-zone {
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+}
+

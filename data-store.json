@@ -1,0 +1,16 @@
+{
+  "resetAt": "2026-10-11T15:43:08.371Z",
+  "students": [],
+  "submissions": [],
+  "certificates": [],
+  "manualOverrides": {},
+  "emailLogs": [],
+  "sprintDay": 1,
+  "adminSeeded": {
+    "email": "faculty@svit.ac.in",
+    "role": "admin",
+    "name": "SVIT Faculty Administrator",
+    "department": "Technical Skill Development Hub",
+    "rollNo": "SVIT-FACULTY"
+  }
+}
