@@ -306,12 +306,24 @@ function validateAdminSession(req, cookies, store, matchedDevice = null) {
     return null;
   }
 
+  // Check if session has been explicitly revoked
+  store.revokedSessions = store.revokedSessions || [];
+  if (store.revokedSessions.includes(payload.sessionId)) {
+    return null;
+  }
+
   store.adminSessions = store.adminSessions || [];
   const now = Date.now();
   store.adminSessions = store.adminSessions.filter(s => s.expiresAt > now);
 
-  const session = store.adminSessions.find(s => s.sessionId === payload.sessionId);
-  if (!session) return null;
+  // In stateless serverless environments, accept validly signed non-expired non-revoked JWT payload
+  const session = store.adminSessions.find(s => s.sessionId === payload.sessionId) || {
+    sessionId: payload.sessionId,
+    email: payload.email,
+    deviceTokenHash: payload.deviceTokenHash || null,
+    createdAt: (payload.iat || 0) * 1000,
+    expiresAt: (payload.exp || 0) * 1000
+  };
 
   if (matchedDevice && session.deviceTokenHash && session.deviceTokenHash !== matchedDevice.tokenHash) {
     return null;
@@ -740,6 +752,8 @@ export function createApiMiddleware() {
           const payload = verifyAdminSessionJwt(sessionJwt);
           if (payload && payload.sessionId) {
             store.adminSessions = (store.adminSessions || []).filter(s => s.sessionId !== payload.sessionId);
+            store.revokedSessions = store.revokedSessions || [];
+            store.revokedSessions.push(payload.sessionId);
           }
         }
         store.adminLoginLogs = store.adminLoginLogs || [];
