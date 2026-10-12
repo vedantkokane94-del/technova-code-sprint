@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useApp } from '../context/AppContext';
 import { getTaskVariant } from '../utils/hash';
-import { getSprintDaySchedule } from '../data/tasksSeed';
+import { getSprintDaySchedule, getDayUnlockTimeUtc, isDayUnlocked } from '../data/tasksSeed';
 import { evaluateCodeSubmission, SUPPORTED_LANGUAGES, checkRequiredConcepts } from '../utils/codeJudge';
 import { QUIZ_QUESTIONS } from '../data/quizSeed';
 import { DAY_POINTS, formatScore, toScoreNumber } from '../utils/scoring';
@@ -31,7 +31,9 @@ import {
   Award,
   Layers,
   Cpu,
-  EyeOff
+  EyeOff,
+  Video,
+  Eye
 } from 'lucide-react';
 import { SVITHubLogo } from '../components/BrandLogo';
 
@@ -43,7 +45,10 @@ export const TaskPage = ({ dayNumber, setCurrentTab }) => {
     submitTaskSolution, 
     currentDay, 
     isAdmin, 
-    addProctoringFlag 
+    addProctoringFlag,
+    hasUserGivenConsent,
+    saveUserConsent,
+    getEffectiveServerTime
   } = useApp();
 
   const task = tasks.find(t => t.day === dayNumber) || tasks[0];
@@ -51,6 +56,24 @@ export const TaskPage = ({ dayNumber, setCurrentTab }) => {
   const maxDayPoints = DAY_POINTS[task.day] || 10;
   const maxProgramPoints = maxDayPoints * 0.70;
   const maxQuizPoints = maxDayPoints * 0.30;
+
+  // Admin preview toggle (Admins can preview any day at any time without changing schedule for students)
+  const [adminPreview, setAdminPreview] = useState(false);
+
+  // UTC Unlock Schedule checking: Day 1 unlocks 13 Oct 2026 8:00 AM IST (2026-10-13T02:30:00Z)
+  const unlockUtc = getDayUnlockTimeUtc(task.day);
+  const unlockMs = Date.parse(unlockUtc);
+
+  const [nowMs, setNowMs] = useState(() => (getEffectiveServerTime ? getEffectiveServerTime() : Date.now()));
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setNowMs(getEffectiveServerTime ? getEffectiveServerTime() : Date.now());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [getEffectiveServerTime]);
+
+  const isDayOpen = isAdmin || adminPreview || nowMs >= unlockMs;
 
   // Language track
   const initialLang = (user?.language || user?.track || 'Python').toLowerCase();
@@ -93,35 +116,73 @@ export const TaskPage = ({ dayNumber, setCurrentTab }) => {
     }
   };
 
-  // Consent & Proctoring State (Section 5)
-  const [consentGranted, setConsentGranted] = useState(() => {
-    const saved = localStorage.getItem(`proctoring_consent_${user?.uid || 'guest'}_day_${task.day}`);
-    return saved === 'true';
-  });
+  // Consent & Proctoring State (Section 3, 4, 5)
+  // Section 4: Remember consent across days (Days 2 to 9 remember Day 1 consent)
+  const userConsentedPreviously = (hasUserGivenConsent && hasUserGivenConsent(user?.uid)) ||
+    localStorage.getItem(`proctoring_consent_${user?.uid || 'guest'}`) === 'true';
+
+  const [consentGranted, setConsentGranted] = useState(() => userConsentedPreviously);
+
   const [isAlternativeMode, setIsAlternativeMode] = useState(() => {
-    const saved = localStorage.getItem(`proctoring_alt_${user?.uid || 'guest'}_day_${task.day}`);
-    return saved === 'true';
+    return localStorage.getItem(`proctoring_alt_${user?.uid || 'guest'}`) === 'true';
   });
+
+  // Section 4: Days 2-9 silent background camera/mic check
+  const [silentCameraFailed, setSilentCameraFailed] = useState(false);
+  useEffect(() => {
+    if (task.day > 1 && consentGranted && !isAlternativeMode && !isAdmin) {
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+          .then(stream => {
+            stream.getTracks().forEach(t => t.stop());
+            setSilentCameraFailed(false);
+          })
+          .catch(err => {
+            console.warn(`Silent device check failed on Day ${task.day}:`, err);
+            setSilentCameraFailed(true);
+          });
+      }
+    }
+  }, [task.day, consentGranted, isAlternativeMode, isAdmin]);
+
   const [proctoringActive, setProctoringActive] = useState(false);
   const [proctoringGraceActive, setProctoringGraceActive] = useState(false);
   const [proctoringFlagsCount, setProctoringFlagsCount] = useState(0);
 
-  const handleConsentAccept = () => {
+  const handleConsentAccept = (data = {}) => {
     setConsentGranted(true);
-    localStorage.setItem(`proctoring_consent_${user?.uid || 'guest'}_day_${task.day}`, 'true');
+    const isAlt = Boolean(data.isAlternativeMode);
+    if (isAlt) {
+      setIsAlternativeMode(true);
+      localStorage.setItem(`proctoring_alt_${user?.uid || 'guest'}`, 'true');
+    }
+    localStorage.setItem(`proctoring_consent_${user?.uid || 'guest'}`, 'true');
+
+    if (saveUserConsent) {
+      saveUserConsent(user?.uid, {
+        consentGiven: true,
+        isAlternativeMode: isAlt,
+        reason: data.alternativeReason || '',
+        day: task.day,
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    if (isAlt) {
+      addProctoringFlag({
+        userId: user?.uid,
+        studentName: user?.name,
+        day: task.day,
+        reason: `Alternative requested: ${data.alternativeReason || 'Camera/Mic not available'}. Scheduled for Faculty Viva.`,
+        status: 'pending'
+      });
+    }
   };
 
   const handleRequestAlternative = (reason) => {
-    setIsAlternativeMode(true);
-    setConsentGranted(true);
-    localStorage.setItem(`proctoring_alt_${user?.uid || 'guest'}_day_${task.day}`, 'true');
-    localStorage.setItem(`proctoring_consent_${user?.uid || 'guest'}_day_${task.day}`, 'true');
-    addProctoringFlag({
-      userId: user?.uid,
-      studentName: user?.name,
-      day: task.day,
-      reason: `Alternative requested: ${reason || 'Camera/Mic not available'}. Scheduled for Faculty Viva.`,
-      status: 'pending'
+    handleConsentAccept({
+      isAlternativeMode: true,
+      alternativeReason: reason
     });
   };
 
@@ -366,25 +427,107 @@ export const TaskPage = ({ dayNumber, setCurrentTab }) => {
     } catch (e) {}
   };
 
-  // Locked Day Check
-  const isLocked = task.day > currentDay;
-  if (isLocked) {
+  // Section 2: Locked Day & Pre-Launch Countdown Screen
+  // Before unlock time, students can give consent, but task questions/hints are not shown.
+  // When 8:00 AM IST arrives, page unlocks automatically without manual refresh.
+  if (!isDayOpen) {
+    const diffMs = Math.max(0, unlockMs - nowMs);
+    const cdDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+    const cdHours = Math.floor((diffMs / (1000 * 60 * 60)) % 24);
+    const cdMinutes = Math.floor((diffMs / (1000 * 60)) % 60);
+    const cdSeconds = Math.floor((diffMs / 1000) % 60);
+
     return (
-      <div className="min-h-screen bg-[#FCF9F2] dark:bg-[#0F1115] py-20 px-4 flex items-center justify-center">
-        <div className="max-w-md w-full bg-white dark:bg-[#181B20] p-8 rounded-3xl border border-[#E8DEC8] dark:border-[#2E3440] text-center shadow-md">
-          <div className="w-16 h-16 rounded-2xl bg-amber-500/10 text-amber-600 flex items-center justify-center mx-auto mb-4">
-            <Lock className="w-8 h-8" />
+      <div className="min-h-screen bg-[#FCF9F2] dark:bg-[#0F1115] py-16 px-4 flex items-center justify-center relative">
+        {/* If consent not yet granted, show consent modal so student can complete it in advance */}
+        {!consentGranted && !isAdmin && (
+          <ProctoringConsentModal
+            dayNumber={task.day}
+            onAccept={handleConsentAccept}
+            onAcceptConsent={handleConsentAccept}
+            onRequestAlternative={handleRequestAlternative}
+          />
+        )}
+
+        <div className="max-w-xl w-full bg-white dark:bg-[#181B20] p-8 sm:p-10 rounded-3xl border border-[#E8DEC8] dark:border-[#2E3440] text-center shadow-xl space-y-6">
+          <div className="w-16 h-16 rounded-3xl bg-[#B3122B]/10 text-[#B3122B] dark:text-[#ff8a9e] flex items-center justify-center mx-auto shadow-inner">
+            <Clock className="w-8 h-8 animate-pulse" />
           </div>
-          <h2 className="text-2xl font-bold text-[#1A1A1A] dark:text-white">Day {task.day} is Locked</h2>
-          <p className="text-sm text-gray-500 mt-2">
-            This task unlocks on <strong>{getSprintDaySchedule(task.day)?.fullDate}</strong> at <strong>8:00 AM IST</strong>.
+
+          <div>
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/10 text-amber-700 dark:text-amber-400 font-bold text-xs mb-2">
+              <Lock className="w-3.5 h-3.5" />
+              <span>Unlocks 8:00 AM IST • Asia/Kolkata</span>
+            </div>
+            <h2 className="text-2xl sm:text-3xl font-extrabold text-[#1A1A1A] dark:text-white">
+              Day {task.day} Countdown
+            </h2>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+              Day {task.day} opens on <strong>{getSprintDaySchedule(task.day)?.fullDate}</strong> at <strong>8:00 AM IST</strong>.
+            </p>
+          </div>
+
+          {/* Live Countdown Clock Cards */}
+          <div className="grid grid-cols-4 gap-2.5 max-w-sm mx-auto">
+            <div className="p-3 rounded-2xl bg-[#FCF9F2] dark:bg-[#14171c] border border-[#E8DEC8] dark:border-[#2E3440]">
+              <div className="text-2xl sm:text-3xl font-mono font-black text-[#B3122B] dark:text-[#ff8a9e]">
+                {String(cdDays).padStart(2, '0')}
+              </div>
+              <div className="text-[10px] font-bold uppercase text-gray-400 mt-1">Days</div>
+            </div>
+            <div className="p-3 rounded-2xl bg-[#FCF9F2] dark:bg-[#14171c] border border-[#E8DEC8] dark:border-[#2E3440]">
+              <div className="text-2xl sm:text-3xl font-mono font-black text-[#B3122B] dark:text-[#ff8a9e]">
+                {String(cdHours).padStart(2, '0')}
+              </div>
+              <div className="text-[10px] font-bold uppercase text-gray-400 mt-1">Hours</div>
+            </div>
+            <div className="p-3 rounded-2xl bg-[#FCF9F2] dark:bg-[#14171c] border border-[#E8DEC8] dark:border-[#2E3440]">
+              <div className="text-2xl sm:text-3xl font-mono font-black text-[#B3122B] dark:text-[#ff8a9e]">
+                {String(cdMinutes).padStart(2, '0')}
+              </div>
+              <div className="text-[10px] font-bold uppercase text-gray-400 mt-1">Mins</div>
+            </div>
+            <div className="p-3 rounded-2xl bg-[#FCF9F2] dark:bg-[#14171c] border border-[#E8DEC8] dark:border-[#2E3440]">
+              <div className="text-2xl sm:text-3xl font-mono font-black text-[#B3122B] dark:text-[#ff8a9e]">
+                {String(cdSeconds).padStart(2, '0')}
+              </div>
+              <div className="text-[10px] font-bold uppercase text-gray-400 mt-1">Secs</div>
+            </div>
+          </div>
+
+          {/* Consent Status Badge */}
+          <div className="p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/25 text-emerald-800 dark:text-emerald-300 text-xs flex items-center justify-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>
+              {consentGranted 
+                ? "Workstation & Consent Checks Verified • Ready for Kickoff!" 
+                : "Consent and device checks completed."}
+            </span>
+          </div>
+
+          <p className="text-xs text-gray-500 max-w-md mx-auto leading-relaxed">
+            The coding challenge, sample test cases, and daily quiz will unlock automatically when the timer reaches zero. You do not need to refresh this page.
           </p>
-          <button
-            onClick={() => setCurrentTab('dashboard')}
-            className="mt-6 px-6 py-2.5 rounded-xl font-bold bg-[#B3122B] text-white text-sm cursor-pointer"
-          >
-            Back to Dashboard
-          </button>
+
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
+            <button
+              onClick={() => setCurrentTab('dashboard')}
+              className="w-full sm:w-auto px-6 py-2.5 rounded-xl font-bold bg-[#B3122B] text-white text-xs hover:bg-[#8B0D20] transition-colors cursor-pointer"
+            >
+              Back to Dashboard
+            </button>
+
+            {/* Admin Preview Mode Toggle */}
+            {isAdmin && (
+              <button
+                onClick={() => setAdminPreview(true)}
+                className="w-full sm:w-auto px-5 py-2.5 rounded-xl font-bold bg-gray-900 text-white text-xs hover:bg-black transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                <Eye className="w-3.5 h-3.5 text-amber-400" />
+                <span>Admin: Preview Task Now</span>
+              </button>
+            )}
+          </div>
         </div>
       </div>
     );
@@ -395,11 +538,40 @@ export const TaskPage = ({ dayNumber, setCurrentTab }) => {
   return (
     <div className="min-h-screen bg-[#FCF9F2] dark:bg-[#0F1115] transition-colors py-8 px-4 sm:px-6 lg:px-8 pb-24 relative">
       
+      {/* Non-blocking top banner if silent background check failed on Days 2-9 */}
+      {silentCameraFailed && (
+        <div className="bg-amber-500/15 border-b border-amber-500/30 px-4 py-2.5 text-xs text-amber-900 dark:text-amber-200 flex flex-col sm:flex-row items-center justify-between gap-2 mb-4 rounded-xl max-w-6xl mx-auto">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+            <span>Camera check failed. Click here to grant permission or request viva review.</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                navigator.mediaDevices?.getUserMedia({ video: true, audio: true })
+                  .then(s => { s.getTracks().forEach(t => t.stop()); setSilentCameraFailed(false); })
+                  .catch(() => alert('Camera permission still blocked. Please check browser permissions.'));
+              }}
+              className="px-2.5 py-1 rounded-lg bg-amber-600 text-white font-bold text-[10px] cursor-pointer"
+            >
+              Grant Permission
+            </button>
+            <button
+              onClick={() => handleRequestAlternative('Silent background device check failed')}
+              className="px-2.5 py-1 rounded-lg bg-white dark:bg-[#181B20] text-amber-900 dark:text-amber-200 font-bold text-[10px] border border-amber-500/40 cursor-pointer"
+            >
+              Request Viva Review
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Proctoring Consent Modal (Section 5) */}
       {!consentGranted && !isAdmin && (
         <ProctoringConsentModal
           dayNumber={task.day}
           onAccept={handleConsentAccept}
+          onAcceptConsent={handleConsentAccept}
           onRequestAlternative={handleRequestAlternative}
         />
       )}

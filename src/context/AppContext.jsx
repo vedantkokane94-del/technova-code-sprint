@@ -1,7 +1,19 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { SEED_TASKS, SPRINT_SCHEDULE, SPRINT_START_DATE, SPRINT_END_DATE, SPRINT_ISSUE_DATE, getSprintDaySchedule } from '../data/tasksSeed';
+import { 
+  SEED_TASKS, 
+  SPRINT_SCHEDULE, 
+  SPRINT_START_DATE, 
+  SPRINT_END_DATE, 
+  SPRINT_ISSUE_DATE, 
+  getSprintDaySchedule,
+  getEffectiveSprintDay,
+  isDayUnlocked,
+  getDayUnlockTimeUtc,
+  getDayDeadlineTimeUtc
+} from '../data/tasksSeed';
 import { getTaskVariant, calculateTextSimilarity, detectAiGeneratedContent } from '../utils/hash';
 import { calculateDayScore, computeUserSummary, formatScore, toScoreNumber, DAY_POINTS, PASS_MARK_POINTS, TOTAL_SPRINT_POINTS } from '../utils/scoring';
+import { DEFAULT_TEMPLATE_CONFIG } from '../utils/certificateGenerator';
 
 const AppContext = createContext();
 
@@ -269,6 +281,129 @@ export const AppProvider = ({ children }) => {
       const next = [entry, ...prev.slice(0, 99)];
       localStorage.setItem('technova_email_audit_runs', JSON.stringify(next));
       return next;
+    });
+  };
+
+  // User Proctoring & Honor Code Consents (remembers across Days 2 to 9)
+  const [userConsents, setUserConsents] = useState(() => {
+    const saved = localStorage.getItem('technova_user_consents');
+    if (saved) {
+      try { return JSON.parse(saved); } catch (e) { return {}; }
+    }
+    return {};
+  });
+
+  const saveUserConsent = (userId, consentData = {}) => {
+    if (!userId) return;
+    setUserConsents(prev => {
+      const next = {
+        ...prev,
+        [userId]: {
+          ...(prev[userId] || {}),
+          ...consentData,
+          consentGiven: true,
+          consentedAt: consentData.consentedAt || new Date().toISOString()
+        }
+      };
+      localStorage.setItem('technova_user_consents', JSON.stringify(next));
+      return next;
+    });
+  };
+
+  const hasUserGivenConsent = (userId) => {
+    if (!userId) return false;
+    return Boolean(userConsents[userId]?.consentGiven);
+  };
+
+  // Section 4: Certificate Template Configuration & Approval
+  const [templateConfig, setTemplateConfig] = useState(() => {
+    const saved = localStorage.getItem('technova_cert_template_config');
+    if (saved) {
+      try { return JSON.parse(saved); } catch (e) { return DEFAULT_TEMPLATE_CONFIG; }
+    }
+    return DEFAULT_TEMPLATE_CONFIG;
+  });
+
+  const updateTemplateConfig = (patch) => {
+    setTemplateConfig(prev => {
+      const next = { ...prev, ...patch };
+      localStorage.setItem('technova_cert_template_config', JSON.stringify(next));
+      return next;
+    });
+  };
+
+  const approveCertificateTemplate = (approverName = "Vedant Kokane") => {
+    setTemplateConfig(prev => {
+      const next = {
+        ...prev,
+        isApproved: true,
+        approvedAt: new Date().toISOString(),
+        approvedBy: approverName
+      };
+      localStorage.setItem('technova_cert_template_config', JSON.stringify(next));
+      return next;
+    });
+  };
+
+  const unlockCertificateTemplate = () => {
+    setTemplateConfig(prev => {
+      const next = {
+        ...prev,
+        isApproved: false,
+        approvedAt: null,
+        approvedBy: null
+      };
+      localStorage.setItem('technova_cert_template_config', JSON.stringify(next));
+      return next;
+    });
+  };
+
+  // Admin Test Mode & Simulated Server Time
+  const [adminTestMode, setAdminTestModeState] = useState(() => {
+    return localStorage.getItem('technova_admin_test_mode') === 'true';
+  });
+
+  const setAdminTestMode = (val) => {
+    setAdminTestModeState(Boolean(val));
+    localStorage.setItem('technova_admin_test_mode', String(Boolean(val)));
+  };
+
+  const [simulatedServerTime, setSimulatedServerTimeState] = useState(() => {
+    const saved = localStorage.getItem('technova_simulated_time');
+    return saved ? parseInt(saved, 10) : null;
+  });
+
+  const setSimulatedServerTime = (timeMsOrNull) => {
+    if (timeMsOrNull === null || timeMsOrNull === undefined) {
+      setSimulatedServerTimeState(null);
+      localStorage.removeItem('technova_simulated_time');
+    } else {
+      setSimulatedServerTimeState(timeMsOrNull);
+      localStorage.setItem('technova_simulated_time', String(timeMsOrNull));
+    }
+  };
+
+  const getEffectiveServerTime = () => {
+    return simulatedServerTime || Date.now();
+  };
+
+  const clearTestStudentData = () => {
+    setSubmissions(prev => {
+      const filtered = prev.filter(s => {
+        const isTest = s.prn?.startsWith('TEST-') || s.prn?.startsWith('DEMO-') || s.email?.includes('test') || s.studentName?.toLowerCase().includes('test student');
+        return !isTest;
+      });
+      localStorage.setItem('technova_submissions', JSON.stringify(filtered));
+      return filtered;
+    });
+
+    setStudents(prev => {
+      const filtered = prev.filter(s => {
+        const isTest = s.prn?.startsWith('TEST-') || s.prn?.startsWith('DEMO-') || s.email?.includes('test') || s.name?.toLowerCase().includes('test student');
+        return !isTest;
+      });
+      localStorage.setItem('technova_students', JSON.stringify(filtered));
+      return filtered;
     });
   };
 
@@ -767,16 +902,45 @@ export const AppProvider = ({ children }) => {
     saveSubmissions(updated);
   };
 
-  // Current Sprint Day helper: Day 1 starts from 13th October 2026
-  const [currentDay, setCurrentDay] = useState(() => {
-    return parseInt(localStorage.getItem('technova_sprint_day') || "1", 10);
+  // Current Sprint Day helper: Day 1 starts from 13th October 2026 (02:30:00Z = 8:00 AM IST)
+  const [dayOverride, setDayOverride] = useState(() => {
+    const saved = localStorage.getItem('technova_sprint_day_override');
+    return saved !== null ? parseInt(saved, 10) : null;
   });
+
+  const calculateCurrentSprintDay = () => {
+    if (dayOverride !== null) return dayOverride;
+    const effTime = simulatedServerTime || Date.now();
+    return getEffectiveSprintDay(effTime);
+  };
+
+  const [currentDay, setCurrentDay] = useState(() => calculateCurrentSprintDay());
+
+  // Reactive interval: auto-unlocks when schedule arrives (e.g. 8:00 AM IST) without page reload
+  useEffect(() => {
+    const updateDay = () => {
+      const next = calculateCurrentSprintDay();
+      setCurrentDay(next);
+    };
+    updateDay();
+    const interval = setInterval(updateDay, 1000);
+    return () => clearInterval(interval);
+  }, [simulatedServerTime, dayOverride]);
 
   const getCurrentSprintDay = () => currentDay;
 
   const setSprintDay = (dayNum) => {
-    setCurrentDay(dayNum);
-    localStorage.setItem('technova_sprint_day', dayNum.toString());
+    const n = Number(dayNum);
+    setDayOverride(n);
+    setCurrentDay(n);
+    localStorage.setItem('technova_sprint_day_override', String(n));
+  };
+
+  const clearDayOverride = () => {
+    setDayOverride(null);
+    localStorage.removeItem('technova_sprint_day_override');
+    const autoDay = getEffectiveSprintDay(simulatedServerTime || Date.now());
+    setCurrentDay(autoDay);
   };
 
   // Reset demo data back to default
@@ -803,12 +967,18 @@ export const AppProvider = ({ children }) => {
       saveSubmissions,
       currentDay,
       setSprintDay,
+      clearDayOverride,
+      dayOverride,
       getCurrentSprintDay,
       sprintSchedule: SPRINT_SCHEDULE,
       sprintStartDate: SPRINT_START_DATE,
       sprintEndDate: SPRINT_END_DATE,
       sprintIssueDate: SPRINT_ISSUE_DATE,
       getSprintDaySchedule,
+      isDayUnlocked,
+      getDayUnlockTimeUtc,
+      getDayDeadlineTimeUtc,
+      getEffectiveSprintDay,
       submitTaskSolution,
       toggleVivaStatus,
       evaluateViva,
@@ -843,6 +1013,19 @@ export const AppProvider = ({ children }) => {
       requestCertificateResend,
       emailAuditRuns,
       logEmailAuditRun,
+      userConsents,
+      saveUserConsent,
+      hasUserGivenConsent,
+      templateConfig,
+      updateTemplateConfig,
+      approveCertificateTemplate,
+      unlockCertificateTemplate,
+      adminTestMode,
+      setAdminTestMode,
+      simulatedServerTime,
+      setSimulatedServerTime,
+      getEffectiveServerTime,
+      clearTestStudentData,
       ADMIN_EMAILS
     }}>
 

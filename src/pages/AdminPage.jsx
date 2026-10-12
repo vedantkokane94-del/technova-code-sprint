@@ -40,12 +40,16 @@ import {
   ShieldAlert,
   KeyRound,
   Shield,
-  Settings
+  Settings,
+  Upload,
+  Play,
+  Unlock
 } from 'lucide-react';
 import { Github } from '../components/GithubIcon';
 import { CertificateView } from '../components/CertificateView';
 import { SVITHubLogo, DurgaMataSketch } from '../components/BrandLogo';
 import { SPRINT_SCHEDULE, SPRINT_START_DATE, SPRINT_END_DATE, SPRINT_ISSUE_DATE, getSprintDaySchedule } from '../data/tasksSeed';
+import { downloadCertificatePdf, DEFAULT_TEMPLATE_CONFIG } from '../utils/certificateGenerator';
 
 export const AdminPage = ({ setCurrentTab }) => {
   const { 
@@ -81,11 +85,24 @@ export const AdminPage = ({ setCurrentTab }) => {
     emailAuditRuns,
     logEmailAuditRun,
     user,
+    setUser,
     isAdmin,
-    loginAsAdmin
+    loginAsAdmin,
+    templateConfig,
+    updateTemplateConfig,
+    approveCertificateTemplate,
+    unlockCertificateTemplate,
+    adminTestMode,
+    setAdminTestMode,
+    simulatedServerTime,
+    setSimulatedServerTime,
+    getEffectiveServerTime,
+    clearTestStudentData,
+    clearDayOverride,
+    dayOverride
   } = useApp();
 
-  const [activeTab, setActiveTab] = useState('submissions'); // 'submissions' | 'proctoring' | 'certificates' | 'verification' | 'tasks'
+  const [activeTab, setActiveTab] = useState('submissions'); // 'submissions' | 'proctoring' | 'certificates' | 'verification' | 'tasks' | 'template' | 'testmode'
   const [filterDay, setFilterDay] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
   
@@ -118,6 +135,39 @@ export const AdminPage = ({ setCurrentTab }) => {
   const skipBatchPauseRef = React.useRef(false);
   const batchCancelRef = React.useRef(false);
   const [showBulkConfirmModal, setShowBulkConfirmModal] = useState(false);
+
+  // Certificate Template State (Section 4)
+  const [showUnlockModal, setShowUnlockModal] = useState(false);
+  const [typedUnlockCode, setTypedUnlockCode] = useState('');
+  const [customDateTimeInput, setCustomDateTimeInput] = useState('');
+  const hubLogoInputRef = React.useRef(null);
+  const sealInputRef = React.useRef(null);
+  const secSigInputRef = React.useRef(null);
+  const princSigInputRef = React.useRef(null);
+
+  const handleImageUpload = (e, assetKey, label) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.includes('png')) {
+      alert(`Invalid format: ${label} must be a PNG image with a transparent background.`);
+      return;
+    }
+
+    if (file.size > 2 * 1024 * 1024) {
+      alert(`File too large: ${label} must be under 2 MB.`);
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (uploadEvt) => {
+      const dataUri = uploadEvt.target.result;
+      updateTemplateConfig({ [assetKey]: dataUri });
+      setAdminToast(`Updated ${label} successfully.`);
+      setTimeout(() => setAdminToast(''), 3000);
+    };
+    reader.readAsDataURL(file);
+  };
 
   // Standard Bcrypt Hash loaded from environment variable (Never hardcode plaintext password)
   const ADMIN_PASSWORD_HASH = import.meta.env.VITE_ADMIN_PASSWORD_HASH || "$2b$10$ZYadSLPwAhGbhqclMY/1E.c5ADCDg06GrCOV6Sl9EtE3JnzfSdiP6";
@@ -409,6 +459,12 @@ export const AdminPage = ({ setCurrentTab }) => {
   const handleSendCertificates = async (rawTargets, options = {}) => {
     const { forceResend = false, isRetryOnly = false } = options;
     if (!rawTargets || rawTargets.length === 0) return;
+
+    // Gate dispatch: Template approval required (Section 4)
+    if (!templateConfig?.isApproved) {
+      alert("Certificate Template Pending Approval: The official certificate template has not been approved yet. Please review and approve the template in the 'Certificate Template' tab before dispatching certificates to students.");
+      return;
+    }
 
     // Filter targets based on idempotency (Section 9.2: skip already sent unless Resend)
     let targets = rawTargets;
@@ -709,6 +765,10 @@ export const AdminPage = ({ setCurrentTab }) => {
 
   // Section 9.2: "Send to all eligible" opens Confirmation Modal with exact counts
   const handleTriggerBulkSend = () => {
+    if (!templateConfig?.isApproved) {
+      alert("Certificate Template Pending Approval: The official certificate template has not been approved yet. Please review and approve the template in the 'Certificate Template' tab before dispatching certificates to students.");
+      return;
+    }
     const eligibleList = studentsWithCertInfo.filter(s => s.eligibility.isEligible);
     if (eligibleList.length === 0) {
       alert("No students currently qualify for certificates. Eligible students must have 50 or more points out of 100 with all integrity flags cleared.");
@@ -1041,11 +1101,11 @@ export const AdminPage = ({ setCurrentTab }) => {
           </div>
         </div>
 
-        {/* View Switcher: Submissions vs Proctoring vs Certificates vs Verification vs Tasks */}
-        <div className="flex items-center gap-3 border-b border-[#E8DEC8] dark:border-[#2E3440] pb-4 mb-6 overflow-x-auto">
+        {/* View Switcher: Submissions vs Proctoring vs Certificates vs Verification vs Tasks vs Certificate Template vs Admin Test Mode */}
+        <div className="flex items-center gap-2.5 border-b border-[#E8DEC8] dark:border-[#2E3440] pb-4 mb-6 overflow-x-auto">
           <button
             onClick={() => setActiveTab('submissions')}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
               activeTab === 'submissions'
                 ? 'bg-[#B3122B] text-white shadow-xs'
                 : 'text-gray-600 dark:text-gray-300 hover:bg-[#F5EFEB] dark:hover:bg-[#1E232B]'
@@ -1055,7 +1115,7 @@ export const AdminPage = ({ setCurrentTab }) => {
           </button>
           <button
             onClick={() => setActiveTab('proctoring')}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1.5 cursor-pointer ${
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1.5 cursor-pointer ${
               activeTab === 'proctoring'
                 ? 'bg-[#B3122B] text-white shadow-xs'
                 : 'text-gray-600 dark:text-gray-300 hover:bg-[#F5EFEB] dark:hover:bg-[#1E232B]'
@@ -1066,7 +1126,7 @@ export const AdminPage = ({ setCurrentTab }) => {
           </button>
           <button
             onClick={() => setActiveTab('certificates')}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1.5 cursor-pointer ${
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1.5 cursor-pointer ${
               activeTab === 'certificates'
                 ? 'bg-[#B3122B] text-white shadow-xs'
                 : 'text-gray-600 dark:text-gray-300 hover:bg-[#F5EFEB] dark:hover:bg-[#1E232B]'
@@ -1076,8 +1136,19 @@ export const AdminPage = ({ setCurrentTab }) => {
             <span>Eligible Students & Certificates ({eligibleCount})</span>
           </button>
           <button
+            onClick={() => setActiveTab('template')}
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1.5 cursor-pointer ${
+              activeTab === 'template'
+                ? 'bg-[#B3122B] text-white shadow-xs'
+                : 'text-gray-600 dark:text-gray-300 hover:bg-[#F5EFEB] dark:hover:bg-[#1E232B]'
+            }`}
+          >
+            <FileText className="w-3.5 h-3.5" />
+            <span>Certificate Template {templateConfig?.isApproved ? '✓' : '(Needs Approval)'}</span>
+          </button>
+          <button
             onClick={() => setActiveTab('verification')}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1.5 cursor-pointer ${
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1.5 cursor-pointer ${
               activeTab === 'verification'
                 ? 'bg-[#B3122B] text-white shadow-xs'
                 : 'text-gray-600 dark:text-gray-300 hover:bg-[#F5EFEB] dark:hover:bg-[#1E232B]'
@@ -1087,8 +1158,19 @@ export const AdminPage = ({ setCurrentTab }) => {
             <span>Verification Logs ({verificationLogs?.length || 0})</span>
           </button>
           <button
+            onClick={() => setActiveTab('testmode')}
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1.5 cursor-pointer ${
+              activeTab === 'testmode'
+                ? 'bg-purple-700 text-white shadow-xs'
+                : 'text-purple-700 dark:text-purple-300 bg-purple-500/10 hover:bg-purple-500/20'
+            }`}
+          >
+            <Clock className="w-3.5 h-3.5" />
+            <span>Admin Test Mode {adminTestMode ? '● ON' : ''}</span>
+          </button>
+          <button
             onClick={() => setActiveTab('tasks')}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
               activeTab === 'tasks'
                 ? 'bg-[#B3122B] text-white shadow-xs'
                 : 'text-gray-600 dark:text-gray-300 hover:bg-[#F5EFEB] dark:hover:bg-[#1E232B]'
@@ -1511,6 +1593,27 @@ export const AdminPage = ({ setCurrentTab }) => {
         {activeTab === 'certificates' && (
           <div className="space-y-6">
             
+            {/* Warning if certificate template is not approved */}
+            {!templateConfig?.isApproved && (
+              <div className="p-4 rounded-3xl bg-amber-500/10 border border-amber-500/30 text-amber-900 dark:text-amber-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs">
+                <div className="flex items-center gap-3">
+                  <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />
+                  <div>
+                    <div className="text-xs font-bold">Official Certificate Template Pending Approval</div>
+                    <div className="text-[11px] text-amber-800 dark:text-amber-300">
+                      Batch email sending is locked until an administrator reviews and approves the official A4 certificate template, transparent PNG assets, and signatories.
+                    </div>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setActiveTab('template')}
+                  className="px-4 py-2 rounded-xl text-xs font-bold bg-[#B3122B] text-white hover:bg-[#8B0D20] shrink-0 transition-colors shadow-xs cursor-pointer"
+                >
+                  Review & Approve Template →
+                </button>
+              </div>
+            )}
+
             {/* Section 9.5: Top Summary Metrics Cards */}
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
               <div className="p-4 rounded-3xl bg-white dark:bg-[#181B20] border border-[#E8DEC8] dark:border-[#2E3440] shadow-xs">
@@ -2361,6 +2464,768 @@ export const AdminPage = ({ setCurrentTab }) => {
                   </table>
                 </div>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* CERTIFICATE TEMPLATE & SIGNATORIES TAB */}
+        {activeTab === 'template' && (
+          <div className="space-y-6">
+            {/* Template Header Banner */}
+            <div className="bg-white dark:bg-[#181B20] p-6 rounded-3xl border border-[#E8DEC8] dark:border-[#2E3440] shadow-xs">
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-[#E8DEC8] dark:border-[#2E3440]">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <FileText className="w-5 h-5 text-[#B3122B]" />
+                    <h3 className="font-extrabold text-lg text-[#1A1A1A] dark:text-white">
+                      Official Certificate Template & Signatory Configuration
+                    </h3>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1 max-w-2xl">
+                    Configure the official A4 landscape completion certificate (842 × 595 pt). Matches <code className="font-mono text-[#B3122B] bg-[#B3122B]/10 px-1.5 py-0.5 rounded">certificate-template.pdf</code> design, color palette (#B3122B red, #F7F3EC cream), Times & Helvetica fonts, and official SVIT signatories.
+                  </p>
+                </div>
+
+                {/* Approval Status Badge & Actions */}
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  {templateConfig?.isApproved ? (
+                    <div className="flex items-center gap-2">
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300 border border-emerald-500/30">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                        <span>Template Approved & Locked</span>
+                      </span>
+                      <button
+                        onClick={() => {
+                          setTypedUnlockCode('');
+                          setShowUnlockModal(true);
+                        }}
+                        className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-[#FCF9F2] dark:bg-[#111317] text-gray-700 dark:text-gray-300 hover:text-[#B3122B] border border-[#E8DEC8] dark:border-[#2E3440] transition-colors flex items-center gap-1.5 cursor-pointer"
+                        title="Unlock template to edit signatories or assets"
+                      >
+                        <Lock className="w-3.5 h-3.5 text-amber-600" />
+                        <span>Unlock to Edit</span>
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300 border border-amber-500/30">
+                        <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+                        <span>Pending Approval</span>
+                      </span>
+                      <button
+                        onClick={() => {
+                          approveCertificateTemplate(user?.name || "Vedant Kokane (Faculty Admin)");
+                          setAdminToast("Certificate Template approved and locked! Ready for student dispatch.");
+                          setTimeout(() => setAdminToast(''), 4000);
+                        }}
+                        className="px-4 py-1.5 rounded-xl text-xs font-bold bg-emerald-600 text-white hover:bg-emerald-700 transition-colors shadow-xs flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        <span>Approve & Lock Template</span>
+                      </button>
+                    </div>
+                  )}
+
+                  <button
+                    onClick={async () => {
+                      try {
+                        await downloadCertificatePdf({
+                          studentName: "Vedant Kokane",
+                          language: "Python",
+                          score: "78.5",
+                          certificateId: "TNV-CS-2026-0000-TEST",
+                          templateConfig
+                        });
+                        setAdminToast("Generated and downloaded sample certificate PDF.");
+                        setTimeout(() => setAdminToast(''), 3000);
+                      } catch (err) {
+                        alert("Error downloading sample PDF: " + err.message);
+                      }
+                    }}
+                    className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-[#B3122B] text-white hover:bg-[#8B0D20] transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
+                    title="Download high-resolution vector PDF generated with current settings"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Download Sample PDF</span>
+                  </button>
+
+                  {!templateConfig?.isApproved && (
+                    <button
+                      onClick={() => {
+                        if (window.confirm("Reset all assets and signatory names back to defaults?")) {
+                          updateTemplateConfig(DEFAULT_TEMPLATE_CONFIG);
+                          setAdminToast("Reset template config to default.");
+                          setTimeout(() => setAdminToast(''), 3000);
+                        }
+                      }}
+                      className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:text-red-600 transition-colors cursor-pointer"
+                      title="Reset assets to standard SVIT defaults"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Approval Info Details */}
+              {templateConfig?.isApproved && (
+                <div className="mt-3 text-xs text-gray-500 flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                  <span>
+                    Locked by <strong className="text-gray-800 dark:text-gray-200">{templateConfig.approvedBy}</strong> on {new Date(templateConfig.approvedAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })} IST. Editing is disabled to ensure all awarded certificates share an immutable layout.
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* Hidden File Inputs for 4 PNG Assets */}
+            <input
+              type="file"
+              ref={hubLogoInputRef}
+              accept="image/png"
+              style={{ display: 'none' }}
+              onChange={(e) => handleImageUpload(e, 'hubLogoUrl', 'Technical Skill Development Hub Logo')}
+            />
+            <input
+              type="file"
+              ref={sealInputRef}
+              accept="image/png"
+              style={{ display: 'none' }}
+              onChange={(e) => handleImageUpload(e, 'sealUrl', 'SVIT College Seal')}
+            />
+            <input
+              type="file"
+              ref={secSigInputRef}
+              accept="image/png"
+              style={{ display: 'none' }}
+              onChange={(e) => handleImageUpload(e, 'secSigUrl', 'Technical Secretary Signature')}
+            />
+            <input
+              type="file"
+              ref={princSigInputRef}
+              accept="image/png"
+              style={{ display: 'none' }}
+              onChange={(e) => handleImageUpload(e, 'princSigUrl', 'Principal Signature')}
+            />
+
+            {/* 4 PNG Images Asset Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {/* Asset 1: Hub Logo */}
+              <div className="bg-white dark:bg-[#181B20] p-4 rounded-3xl border border-[#E8DEC8] dark:border-[#2E3440] shadow-xs flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-bold text-[#1A1A1A] dark:text-white">1. Hub Logo</span>
+                    <span className="text-[10px] text-gray-400 font-mono">94×94 pt</span>
+                  </div>
+                  <div className="w-full h-32 rounded-2xl bg-[#F7F3EC] dark:bg-[#111317] border border-[#E8DEC8] dark:border-[#2E3440] flex items-center justify-center p-3 overflow-hidden">
+                    <img
+                      src={templateConfig?.hubLogoUrl || '/hub-logo.png'}
+                      alt="Hub Logo"
+                      className="max-h-full max-w-full object-contain"
+                    />
+                  </div>
+                  <p className="text-[11px] text-gray-500 mt-2">
+                    Top-center crest. Transparent PNG, red outline & Durga Mata sketch.
+                  </p>
+                </div>
+                <button
+                  onClick={() => hubLogoInputRef.current?.click()}
+                  disabled={templateConfig?.isApproved}
+                  className="mt-3 w-full py-2 rounded-xl text-xs font-bold border border-[#E8DEC8] dark:border-[#2E3440] hover:border-[#B3122B] text-gray-700 dark:text-gray-300 transition-colors flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>Replace Logo (PNG)</span>
+                </button>
+              </div>
+
+              {/* Asset 2: College Seal */}
+              <div className="bg-white dark:bg-[#181B20] p-4 rounded-3xl border border-[#E8DEC8] dark:border-[#2E3440] shadow-xs flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-bold text-[#1A1A1A] dark:text-white">2. College Seal</span>
+                    <span className="text-[10px] text-gray-400 font-mono">82×82 pt</span>
+                  </div>
+                  <div className="w-full h-32 rounded-2xl bg-[#F7F3EC] dark:bg-[#111317] border border-[#E8DEC8] dark:border-[#2E3440] flex items-center justify-center p-3 overflow-hidden">
+                    <img
+                      src={templateConfig?.sealUrl || '/college-seal.png'}
+                      alt="College Seal"
+                      className="max-h-full max-w-full object-contain"
+                    />
+                  </div>
+                  <p className="text-[11px] text-gray-500 mt-2">
+                    Bottom-center official SVIT Pravara seal. Transparent PNG.
+                  </p>
+                </div>
+                <button
+                  onClick={() => sealInputRef.current?.click()}
+                  disabled={templateConfig?.isApproved}
+                  className="mt-3 w-full py-2 rounded-xl text-xs font-bold border border-[#E8DEC8] dark:border-[#2E3440] hover:border-[#B3122B] text-gray-700 dark:text-gray-300 transition-colors flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>Replace Seal (PNG)</span>
+                </button>
+              </div>
+
+              {/* Asset 3: Technical Secretary Signature */}
+              <div className="bg-white dark:bg-[#181B20] p-4 rounded-3xl border border-[#E8DEC8] dark:border-[#2E3440] shadow-xs flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-bold text-[#1A1A1A] dark:text-white">3. Secretary Signature</span>
+                    <span className="text-[10px] text-gray-400 font-mono">Baseline 503 pt</span>
+                  </div>
+                  <div className="w-full h-32 rounded-2xl bg-[#F7F3EC] dark:bg-[#111317] border border-[#E8DEC8] dark:border-[#2E3440] flex items-center justify-center p-3 overflow-hidden">
+                    <img
+                      src={templateConfig?.secSigUrl || '/signature-technical-secretary.png'}
+                      alt="Secretary Signature"
+                      className="max-h-full max-w-full object-contain"
+                    />
+                  </div>
+                  <p className="text-[11px] text-gray-500 mt-2">
+                    Left signatory block. Transparent PNG, black ink.
+                  </p>
+                </div>
+                <button
+                  onClick={() => secSigInputRef.current?.click()}
+                  disabled={templateConfig?.isApproved}
+                  className="mt-3 w-full py-2 rounded-xl text-xs font-bold border border-[#E8DEC8] dark:border-[#2E3440] hover:border-[#B3122B] text-gray-700 dark:text-gray-300 transition-colors flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>Replace Signature (PNG)</span>
+                </button>
+              </div>
+
+              {/* Asset 4: Principal Signature */}
+              <div className="bg-white dark:bg-[#181B20] p-4 rounded-3xl border border-[#E8DEC8] dark:border-[#2E3440] shadow-xs flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-bold text-[#1A1A1A] dark:text-white">4. Principal Signature</span>
+                    <span className="text-[10px] text-gray-400 font-mono">Baseline 503 pt</span>
+                  </div>
+                  <div className="w-full h-32 rounded-2xl bg-[#F7F3EC] dark:bg-[#111317] border border-[#E8DEC8] dark:border-[#2E3440] flex items-center justify-center p-3 overflow-hidden">
+                    <img
+                      src={templateConfig?.princSigUrl || '/signature-principal.png'}
+                      alt="Principal Signature"
+                      className="max-h-full max-w-full object-contain"
+                    />
+                  </div>
+                  <p className="text-[11px] text-gray-500 mt-2">
+                    Right signatory block. Transparent PNG, blue ink.
+                  </p>
+                </div>
+                <button
+                  onClick={() => princSigInputRef.current?.click()}
+                  disabled={templateConfig?.isApproved}
+                  className="mt-3 w-full py-2 rounded-xl text-xs font-bold border border-[#E8DEC8] dark:border-[#2E3440] hover:border-[#B3122B] text-gray-700 dark:text-gray-300 transition-colors flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>Replace Signature (PNG)</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Signatory Names & Titles Form */}
+            <div className="bg-white dark:bg-[#181B20] p-6 rounded-3xl border border-[#E8DEC8] dark:border-[#2E3440] shadow-xs">
+              <h4 className="font-extrabold text-sm text-[#1A1A1A] dark:text-white mb-4 flex items-center gap-2">
+                <Edit3 className="w-4 h-4 text-[#B3122B]" />
+                <span>Signatory Details (Baseline 523 & 537 pt)</span>
+              </h4>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                {/* Signatory 1: Technical Secretary */}
+                <div className="p-4 rounded-2xl bg-[#FCF9F2] dark:bg-[#111317] border border-[#E8DEC8] dark:border-[#2E3440] space-y-3">
+                  <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">
+                    Signatory 1 (Left Box)
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                      Full Name (Helvetica Bold 12 pt)
+                    </label>
+                    <input
+                      type="text"
+                      disabled={templateConfig?.isApproved}
+                      value={templateConfig?.secName || 'Vedant Kokane'}
+                      onChange={(e) => updateTemplateConfig({ secName: e.target.value })}
+                      className="w-full p-2.5 rounded-xl border border-[#E8DEC8] dark:border-[#2E3440] bg-white dark:bg-[#181B20] text-xs font-bold text-[#1A1A1A] dark:text-white disabled:opacity-60"
+                      placeholder="e.g. Vedant Kokane"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                      Designation & Department (Helvetica 10 pt)
+                    </label>
+                    <input
+                      type="text"
+                      disabled={templateConfig?.isApproved}
+                      value={templateConfig?.secTitle || 'Technical Secretary, SVIT Nashik'}
+                      onChange={(e) => updateTemplateConfig({ secTitle: e.target.value })}
+                      className="w-full p-2.5 rounded-xl border border-[#E8DEC8] dark:border-[#2E3440] bg-white dark:bg-[#181B20] text-xs text-[#1A1A1A] dark:text-white disabled:opacity-60"
+                      placeholder="e.g. Technical Secretary, SVIT Nashik"
+                    />
+                  </div>
+                </div>
+
+                {/* Signatory 2: Principal */}
+                <div className="p-4 rounded-2xl bg-[#FCF9F2] dark:bg-[#111317] border border-[#E8DEC8] dark:border-[#2E3440] space-y-3">
+                  <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">
+                    Signatory 2 (Right Box)
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                      Full Name (Helvetica Bold 12 pt)
+                    </label>
+                    <input
+                      type="text"
+                      disabled={templateConfig?.isApproved}
+                      value={templateConfig?.princName || 'Dr. Sarang S. Pande'}
+                      onChange={(e) => updateTemplateConfig({ princName: e.target.value })}
+                      className="w-full p-2.5 rounded-xl border border-[#E8DEC8] dark:border-[#2E3440] bg-white dark:bg-[#181B20] text-xs font-bold text-[#1A1A1A] dark:text-white disabled:opacity-60"
+                      placeholder="e.g. Dr. Sarang S. Pande"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                      Designation & Institution (Helvetica 10 pt)
+                    </label>
+                    <input
+                      type="text"
+                      disabled={templateConfig?.isApproved}
+                      value={templateConfig?.princTitle || 'Principal, SVIT Nashik'}
+                      onChange={(e) => updateTemplateConfig({ princTitle: e.target.value })}
+                      className="w-full p-2.5 rounded-xl border border-[#E8DEC8] dark:border-[#2E3440] bg-white dark:bg-[#181B20] text-xs text-[#1A1A1A] dark:text-white disabled:opacity-60"
+                      placeholder="e.g. Principal, SVIT Nashik"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Live Interactive Certificate Preview */}
+            <div className="bg-white dark:bg-[#181B20] p-6 rounded-3xl border border-[#E8DEC8] dark:border-[#2E3440] shadow-xs">
+              <div className="flex items-center justify-between pb-4 border-b border-[#E8DEC8] dark:border-[#2E3440] mb-4">
+                <div>
+                  <h4 className="font-extrabold text-sm text-[#1A1A1A] dark:text-white flex items-center gap-2">
+                    <Eye className="w-4 h-4 text-[#B3122B]" />
+                    <span>Live Vector Certificate Preview (Sample Student)</span>
+                  </h4>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    Live responsive rendering of the exact PDF geometry, fonts, red double border, college seal, and signatures.
+                  </p>
+                </div>
+                <button
+                  onClick={async () => {
+                    try {
+                      await downloadCertificatePdf({
+                        studentName: "Vedant Kokane",
+                        language: "Python",
+                        score: "78.5",
+                        certificateId: "TNV-CS-2026-0000-TEST",
+                        templateConfig
+                      });
+                    } catch (err) {
+                      alert("Error generating PDF: " + err.message);
+                    }
+                  }}
+                  className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-[#FCF9F2] dark:bg-[#111317] text-[#B3122B] hover:bg-[#B3122B] hover:text-white border border-[#B3122B]/30 transition-all flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Download Test PDF</span>
+                </button>
+              </div>
+
+              <div className="py-2">
+                <CertificateView
+                  studentName="Vedant Kokane"
+                  prn="SVIT2026-0042"
+                  track="Python"
+                  score="78.5"
+                  certificateId="TNV-CS-2026-0000-TEST"
+                  startDate={SPRINT_START_DATE}
+                  endDate={SPRINT_END_DATE}
+                  issueDate={SPRINT_ISSUE_DATE}
+                  showDownloadButton={true}
+                />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ADMIN TEST MODE & SIMULATION TAB */}
+        {activeTab === 'testmode' && (
+          <div className="space-y-6">
+            {/* Header Banner */}
+            <div className="bg-white dark:bg-[#181B20] p-6 rounded-3xl border border-[#E8DEC8] dark:border-[#2E3440] shadow-xs">
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-[#E8DEC8] dark:border-[#2E3440]">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <Clock className="w-5 h-5 text-purple-600" />
+                    <h3 className="font-extrabold text-lg text-[#1A1A1A] dark:text-white">
+                      Admin Test Mode & Sprint Time Simulation
+                    </h3>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1 max-w-2xl">
+                    Simulate any moment in the 9-day schedule (13 Oct to 21 Oct 2026). Test pre-launch countdowns, Day 1 auto-unlock, cross-day consent bypass, scoring formulas, viva reviews, and certificate issuance without waiting for real calendar dates.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <div className={`px-3 py-1.5 rounded-full text-xs font-bold border flex items-center gap-2 ${
+                    simulatedServerTime 
+                      ? 'bg-purple-100 dark:bg-purple-950/40 text-purple-800 dark:text-purple-300 border-purple-500/40' 
+                      : 'bg-emerald-100 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 border-emerald-500/40'
+                  }`}>
+                    <span className="w-2 h-2 rounded-full animate-pulse bg-current"></span>
+                    <span>{simulatedServerTime ? 'Simulation Clock Active' : 'Real System Clock Active'}</span>
+                  </div>
+
+                  {simulatedServerTime && (
+                    <button
+                      onClick={() => {
+                        setSimulatedServerTime(null);
+                        clearDayOverride();
+                        setAdminToast("Reset simulated time. Restored real system clock.");
+                        setTimeout(() => setAdminToast(''), 3000);
+                      }}
+                      className="px-3 py-1.5 rounded-xl text-xs font-bold bg-white dark:bg-[#181B20] text-gray-700 dark:text-gray-300 border border-[#E8DEC8] dark:border-[#2E3440] hover:text-[#B3122B] transition-colors flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <RotateCw className="w-3.5 h-3.5" />
+                      <span>Reset to Real Time</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Current Effective Server Time Box */}
+              <div className="mt-4 p-4 rounded-2xl bg-purple-50 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-900/50 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                <div>
+                  <div className="text-[11px] font-bold text-purple-700 dark:text-purple-400 uppercase tracking-wider">
+                    Current Effective Sprint Server Time (Asia/Kolkata)
+                  </div>
+                  <div className="text-xl font-black text-[#1A1A1A] dark:text-white font-mono mt-0.5">
+                    {new Date(getEffectiveServerTime()).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })} IST
+                  </div>
+                  <div className="text-[11px] text-gray-500 font-mono mt-0.5">
+                    UTC: {new Date(getEffectiveServerTime()).toISOString()}
+                  </div>
+                </div>
+
+                <div className="text-right sm:text-right">
+                  <div className="text-[11px] font-bold text-gray-500">Effective Sprint Day</div>
+                  <div className="text-xl font-black text-[#B3122B]">
+                    {currentDay === 0 ? "Pre-Launch (Day 0)" : `Day ${currentDay} of 9`}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Test as Student Mode & Data Clean Controls */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Card 1: Test As Student */}
+              <div className="bg-white dark:bg-[#181B20] p-5 rounded-3xl border border-[#E8DEC8] dark:border-[#2E3440] shadow-xs flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center gap-2 mb-2">
+                    <User className="w-4 h-4 text-[#B3122B]" />
+                    <h4 className="font-bold text-sm text-[#1A1A1A] dark:text-white">
+                      Test As Student Switch
+                    </h4>
+                  </div>
+                  <p className="text-xs text-gray-500">
+                    Switch directly into a student test session (PRN: <code>TEST-2026-0001</code>) to experience consent screens, camera checks, problem solving, code tests, and quiz workflows as a student.
+                  </p>
+                </div>
+
+                <div className="mt-4 pt-3 border-t border-[#E8DEC8]/60 dark:border-[#2E3440] flex items-center justify-between gap-3">
+                  <button
+                    onClick={() => {
+                      setUser({
+                        uid: "test-student-admin-01",
+                        name: "Test Student (Admin Mode)",
+                        email: "test.student@svit.ac.in",
+                        prn: "TEST-2026-0001",
+                        track: "Python",
+                        role: "student",
+                        year: "TE",
+                        department: "Computer Engineering"
+                      });
+                      setAdminTestMode(true);
+                      setCurrentTab('dashboard');
+                    }}
+                    className="w-full py-2.5 rounded-xl text-xs font-bold bg-[#B3122B] text-white hover:bg-[#8B0D20] transition-colors flex items-center justify-center gap-2 shadow-xs cursor-pointer"
+                  >
+                    <Play className="w-3.5 h-3.5" />
+                    <span>Launch Student Dashboard as Test Student</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Card 2: Clear Test Student Data */}
+              <div className="bg-white dark:bg-[#181B20] p-5 rounded-3xl border border-[#E8DEC8] dark:border-[#2E3440] shadow-xs flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center gap-2 mb-2">
+                    <RefreshCw className="w-4 h-4 text-amber-600" />
+                    <h4 className="font-bold text-sm text-[#1A1A1A] dark:text-white">
+                      Clear Test Student Data
+                    </h4>
+                  </div>
+                  <p className="text-xs text-gray-500">
+                    Purges demo registrations and test submissions (records with PRN prefix <code className="font-mono">TEST-</code> or <code className="font-mono">DEMO-</code>) while preserving all configuration, seed tasks, and official student entries.
+                  </p>
+                </div>
+
+                <div className="mt-4 pt-3 border-t border-[#E8DEC8]/60 dark:border-[#2E3440]">
+                  <button
+                    onClick={() => {
+                      if (window.confirm("Remove all test submissions and student records created during test runs?")) {
+                        clearTestStudentData();
+                        setAdminToast("Cleared test student data successfully.");
+                        setTimeout(() => setAdminToast(''), 3000);
+                      }
+                    }}
+                    className="w-full py-2.5 rounded-xl text-xs font-bold bg-amber-100 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 hover:bg-amber-200 border border-amber-300 dark:border-amber-900 transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    <span>Clear Only Test Student Records</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Time Travel Presets Grid */}
+            <div className="bg-white dark:bg-[#181B20] p-6 rounded-3xl border border-[#E8DEC8] dark:border-[#2E3440] shadow-xs">
+              <h4 className="font-extrabold text-sm text-[#1A1A1A] dark:text-white mb-2 flex items-center gap-2">
+                <Calendar className="w-4 h-4 text-purple-600" />
+                <span>Simulation Time Presets (One-Click Jump)</span>
+              </h4>
+              <p className="text-xs text-gray-500 mb-4">
+                Click any preset below to instantaneously shift the application clock to that moment:
+              </p>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {/* Preset 1: Pre-Launch */}
+                <button
+                  onClick={() => {
+                    const t = Date.parse('2026-10-12T12:30:00Z'); // 12 Oct 6:00 PM IST
+                    setSimulatedServerTime(t);
+                    setAdminToast("Set simulated time to Pre-Launch (12 Oct 2026, 6:00 PM IST).");
+                    setTimeout(() => setAdminToast(''), 3000);
+                  }}
+                  className="p-3.5 rounded-2xl bg-[#FCF9F2] dark:bg-[#111317] border border-[#E8DEC8] dark:border-[#2E3440] hover:border-purple-500 text-left transition-all cursor-pointer group"
+                >
+                  <div className="text-xs font-bold text-[#1A1A1A] dark:text-white group-hover:text-purple-600 transition-colors">
+                    1. Pre-Launch (Day 0)
+                  </div>
+                  <div className="text-[11px] font-mono text-purple-600 dark:text-purple-400 mt-0.5">
+                    12 Oct 2026, 06:00 PM IST
+                  </div>
+                  <p className="text-[10px] text-gray-500 mt-1">
+                    Verifies pre-registration, consent form, and the live countdown screen before Day 1 unlocks.
+                  </p>
+                </button>
+
+                {/* Preset 2: 15s Before Kickoff */}
+                <button
+                  onClick={() => {
+                    const t = Date.parse('2026-10-13T02:29:45Z'); // 13 Oct 7:59:45 AM IST (15s before 8:00 AM)
+                    setSimulatedServerTime(t);
+                    setAdminToast("Set simulated time to 15s Before Kickoff. Watch live auto-unlock!");
+                    setTimeout(() => setAdminToast(''), 3000);
+                  }}
+                  className="p-3.5 rounded-2xl bg-[#FCF9F2] dark:bg-[#111317] border border-[#E8DEC8] dark:border-[#2E3440] hover:border-purple-500 text-left transition-all cursor-pointer group"
+                >
+                  <div className="text-xs font-bold text-[#1A1A1A] dark:text-white group-hover:text-purple-600 transition-colors">
+                    2. 15s Before Kickoff ⏱️
+                  </div>
+                  <div className="text-[11px] font-mono text-purple-600 dark:text-purple-400 mt-0.5">
+                    13 Oct 2026, 07:59:45 AM IST
+                  </div>
+                  <p className="text-[10px] text-gray-500 mt-1">
+                    Countdown timer ticks down to 0:00 and automatically unlocks Day 1 live on the student screen.
+                  </p>
+                </button>
+
+                {/* Preset 3: Day 1 Active */}
+                <button
+                  onClick={() => {
+                    const t = Date.parse('2026-10-13T05:30:00Z'); // 13 Oct 11:00 AM IST
+                    setSimulatedServerTime(t);
+                    setAdminToast("Set simulated time to Day 1 Active (13 Oct 2026, 11:00 AM IST).");
+                    setTimeout(() => setAdminToast(''), 3000);
+                  }}
+                  className="p-3.5 rounded-2xl bg-[#FCF9F2] dark:bg-[#111317] border border-[#E8DEC8] dark:border-[#2E3440] hover:border-purple-500 text-left transition-all cursor-pointer group"
+                >
+                  <div className="text-xs font-bold text-[#1A1A1A] dark:text-white group-hover:text-purple-600 transition-colors">
+                    3. Day 1 Kickoff Active
+                  </div>
+                  <div className="text-[11px] font-mono text-purple-600 dark:text-purple-400 mt-0.5">
+                    13 Oct 2026, 11:00 AM IST
+                  </div>
+                  <p className="text-[10px] text-gray-500 mt-1">
+                    Day 1 challenge active (5 points). Problem statement, variants, and quiz open for submissions.
+                  </p>
+                </button>
+
+                {/* Preset 4: Day 2 Active */}
+                <button
+                  onClick={() => {
+                    const t = Date.parse('2026-10-14T04:30:00Z'); // 14 Oct 10:00 AM IST
+                    setSimulatedServerTime(t);
+                    setAdminToast("Set simulated time to Day 2 Active (14 Oct 2026, 10:00 AM IST).");
+                    setTimeout(() => setAdminToast(''), 3000);
+                  }}
+                  className="p-3.5 rounded-2xl bg-[#FCF9F2] dark:bg-[#111317] border border-[#E8DEC8] dark:border-[#2E3440] hover:border-purple-500 text-left transition-all cursor-pointer group"
+                >
+                  <div className="text-xs font-bold text-[#1A1A1A] dark:text-white group-hover:text-purple-600 transition-colors">
+                    4. Day 2 Active (Consent Bypass)
+                  </div>
+                  <div className="text-[11px] font-mono text-purple-600 dark:text-purple-400 mt-0.5">
+                    14 Oct 2026, 10:00 AM IST
+                  </div>
+                  <p className="text-[10px] text-gray-500 mt-1">
+                    Tests cross-day consent bypassing: modal is skipped for students who consented on Day 1.
+                  </p>
+                </button>
+
+                {/* Preset 5: Catch-Up Period */}
+                <button
+                  onClick={() => {
+                    const t = Date.parse('2026-10-21T12:30:00Z'); // 21 Oct 6:00 PM IST
+                    setSimulatedServerTime(t);
+                    setAdminToast("Set simulated time to Catch-Up Period (21 Oct 2026, 6:00 PM IST).");
+                    setTimeout(() => setAdminToast(''), 3000);
+                  }}
+                  className="p-3.5 rounded-2xl bg-[#FCF9F2] dark:bg-[#111317] border border-[#E8DEC8] dark:border-[#2E3440] hover:border-purple-500 text-left transition-all cursor-pointer group"
+                >
+                  <div className="text-xs font-bold text-[#1A1A1A] dark:text-white group-hover:text-purple-600 transition-colors">
+                    5. Catch-Up Window (50% Points)
+                  </div>
+                  <div className="text-[11px] font-mono text-purple-600 dark:text-purple-400 mt-0.5">
+                    21 Oct 2026, 06:00 PM IST
+                  </div>
+                  <p className="text-[10px] text-gray-500 mt-1">
+                    All 9 days unlocked. Catch-up submissions receive 50% points. Closes at 11:59 PM IST.
+                  </p>
+                </button>
+
+                {/* Preset 6: Post-Sprint Results Locked */}
+                <button
+                  onClick={() => {
+                    const t = Date.parse('2026-10-21T18:35:00Z'); // 22 Oct 12:05 AM IST (after 11:59 PM 21 Oct)
+                    setSimulatedServerTime(t);
+                    setAdminToast("Set simulated time to Post-Sprint Results Locked (22 Oct 2026).");
+                    setTimeout(() => setAdminToast(''), 3000);
+                  }}
+                  className="p-3.5 rounded-2xl bg-[#FCF9F2] dark:bg-[#111317] border border-[#E8DEC8] dark:border-[#2E3440] hover:border-purple-500 text-left transition-all cursor-pointer group"
+                >
+                  <div className="text-xs font-bold text-[#1A1A1A] dark:text-white group-hover:text-purple-600 transition-colors">
+                    6. Results Locked (Final Close) 🔒
+                  </div>
+                  <div className="text-[11px] font-mono text-purple-600 dark:text-purple-400 mt-0.5">
+                    22 Oct 2026, 12:05 AM IST
+                  </div>
+                  <p className="text-[10px] text-gray-500 mt-1">
+                    Submissions permanently locked. Pass mark (≥ 50 pts) determines certificate qualification.
+                  </p>
+                </button>
+              </div>
+
+              {/* Custom Datetime Input */}
+              <div className="mt-5 pt-4 border-t border-[#E8DEC8]/60 dark:border-[#2E3440] flex flex-col sm:flex-row items-center gap-3">
+                <div className="text-xs font-bold text-gray-700 dark:text-gray-300 shrink-0">
+                  Custom Simulation Timestamp:
+                </div>
+                <input
+                  type="datetime-local"
+                  value={customDateTimeInput}
+                  onChange={(e) => setCustomDateTimeInput(e.target.value)}
+                  className="p-2 rounded-xl border border-[#E8DEC8] dark:border-[#2E3440] bg-[#FCF9F2] dark:bg-[#111317] text-xs font-mono text-[#1A1A1A] dark:text-white flex-1"
+                />
+                <button
+                  onClick={() => {
+                    if (!customDateTimeInput) return;
+                    const parsed = Date.parse(customDateTimeInput);
+                    if (isNaN(parsed)) {
+                      alert("Invalid date format");
+                      return;
+                    }
+                    setSimulatedServerTime(parsed);
+                    setAdminToast(`Set simulated server time to ${new Date(parsed).toLocaleString()}`);
+                    setTimeout(() => setAdminToast(''), 3000);
+                  }}
+                  disabled={!customDateTimeInput}
+                  className="px-4 py-2 rounded-xl text-xs font-bold bg-purple-700 text-white hover:bg-purple-800 disabled:opacity-40 transition-colors cursor-pointer shrink-0"
+                >
+                  Apply Custom Time
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Template Unlock Confirmation Modal */}
+        {showUnlockModal && (
+          <div className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+            <div className="bg-white dark:bg-[#181B20] rounded-3xl p-6 sm:p-8 max-w-md w-full border border-[#E8DEC8] dark:border-[#2E3440] shadow-2xl">
+              <div className="flex items-center justify-between pb-3 border-b border-[#E8DEC8] dark:border-[#2E3440] mb-4">
+                <div className="flex items-center gap-2">
+                  <Lock className="w-5 h-5 text-amber-600" />
+                  <h3 className="font-extrabold text-base text-[#1A1A1A] dark:text-white">
+                    Unlock Certificate Template
+                  </h3>
+                </div>
+                <button
+                  onClick={() => setShowUnlockModal(false)}
+                  className="text-gray-400 hover:text-gray-600 dark:hover:text-white text-sm cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="space-y-4 text-xs">
+                <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-800 dark:text-amber-300">
+                  <p className="font-bold mb-1">Safety Lockout Confirmation</p>
+                  <p className="text-[11px] leading-relaxed">
+                    This template was approved and locked to ensure that all student certificates share an identical layout, verified signatures, and SVIT branding. Unlocking enables replacement of logos, seals, signatures, and signatory titles.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block font-bold text-gray-700 dark:text-gray-300 mb-1.5">
+                    Type <code className="bg-gray-100 dark:bg-gray-800 px-1 py-0.5 rounded text-[#B3122B] font-mono">CONFIRM UNLOCK</code> to unlock:
+                  </label>
+                  <input
+                    type="text"
+                    value={typedUnlockCode}
+                    onChange={(e) => setTypedUnlockCode(e.target.value)}
+                    placeholder="CONFIRM UNLOCK"
+                    className="w-full p-2.5 rounded-xl border border-[#E8DEC8] dark:border-[#2E3440] bg-[#FCF9F2] dark:bg-[#111317] text-xs font-mono font-bold text-[#1A1A1A] dark:text-white uppercase"
+                  />
+                </div>
+
+                <div className="pt-2 flex items-center justify-end gap-2.5">
+                  <button
+                    onClick={() => setShowUnlockModal(false)}
+                    className="px-4 py-2 rounded-xl font-semibold bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 text-xs cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (typedUnlockCode.trim() !== 'CONFIRM UNLOCK') {
+                        alert('You must type CONFIRM UNLOCK exactly to unlock the template.');
+                        return;
+                      }
+                      unlockCertificateTemplate();
+                      setShowUnlockModal(false);
+                      setTypedUnlockCode('');
+                      setAdminToast("Template unlocked for editing.");
+                      setTimeout(() => setAdminToast(''), 3000);
+                    }}
+                    disabled={typedUnlockCode.trim() !== 'CONFIRM UNLOCK'}
+                    className="px-4 py-2 rounded-xl font-bold bg-[#B3122B] text-white hover:bg-[#8B0D20] text-xs transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                  >
+                    Confirm & Unlock
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         )}

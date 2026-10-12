@@ -8,6 +8,9 @@
 ## 🚀 Overview
 "Technova Code Sprint: 9 Days to Build" is a 9-day structured developer sprint web application built for students of **SVIT Nashik**. Students across **Web**, **App**, **Python**, and **DSA** tracks complete daily 30-60 minute micro-challenges that progress from beginner concepts to a full capstone project.
 
+### 🔍 Bug Investigation & Root-Cause Analysis: "Accept and Begin Day 1" Consent Flow
+**Root Cause Note**: The "Accept and Begin Day 1" button on the proctoring consent modal failed to respond because of a prop name discrepancy between component invocation and definition: `TaskPage.jsx` passed `onAccept={handleConsentAccept}` whereas `ProctoringConsentModal.jsx` bound its click handler to `onClick={onAcceptConsent}`, leaving `onAcceptConsent` undefined so click events terminated as a no-op without updating consent state or unblocking the UI. In addition, the modal lacked inline camera/microphone pre-flight verification, did not handle browser permission exceptions (`NotAllowedError`, `NotFoundError`, `NotReadableError`), lacked a 10-second timeout on face-detection initialization, omitted an explicit "Missing requirements" indicator when disabled, and did not account for the pre-launch countdown schedule (opening at 8:00 AM IST on 13 Oct 2026 in `Asia/Kolkata` time zone), causing students to be trapped on a non-responsive modal or locked screen without real-time unlock transitions.
+
 ---
 
 ## 🌟 Key Features

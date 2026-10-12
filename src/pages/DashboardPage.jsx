@@ -431,7 +431,7 @@ export const DashboardPage = ({ setCurrentTab, setSelectedDay }) => {
                       {taskPoints} Max Pts (70% Prog + 30% Quiz)
                     </span>
 
-                    {isLocked ? (
+                    {isLocked && !(task.day === 1 && currentDay === 0) ? (
                       <span className="text-xs text-gray-400 font-medium flex items-center gap-1">
                         <Lock className="w-3.5 h-3.5" />
                         <span>Unlocks 8 AM IST</span>
@@ -440,14 +440,24 @@ export const DashboardPage = ({ setCurrentTab, setSelectedDay }) => {
                       <button
                         onClick={() => handleOpenDay(task.day)}
                         className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-                          isOpen
+                          task.day === 1 && currentDay === 0
+                            ? 'bg-[#B3122B] text-white hover:bg-[#8B0D20] shadow-xs'
+                            : isOpen
                             ? 'bg-[#B3122B] text-white hover:bg-[#8B0D20] shadow-xs'
                             : isSubmitted
                             ? 'bg-[#F5EFEB] dark:bg-[#252A34] text-[#1A1A1A] dark:text-white hover:border-[#B3122B]'
                             : 'bg-amber-600 text-white hover:bg-amber-700'
                         }`}
                       >
-                        <span>{isSubmitted ? 'View / Retry' : isMissed ? 'Catch Up' : 'Solve Task'}</span>
+                        <span>
+                          {task.day === 1 && currentDay === 0 
+                            ? 'Pre-Consent & Countdown' 
+                            : isSubmitted 
+                            ? 'View / Retry' 
+                            : isMissed 
+                            ? 'Catch Up' 
+                            : 'Solve Task'}
+                        </span>
                         <ArrowRight className="w-3.5 h-3.5" />
                       </button>
                     )}
