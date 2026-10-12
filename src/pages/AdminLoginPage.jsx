@@ -17,7 +17,7 @@ import { loginAdminWithEmailAndPassword } from '../services/api';
 import { useApp } from '../context/AppContext';
 
 export const AdminLoginPage = ({ onLoginSuccess, onNavigateHome }) => {
-  const { loginAsAdmin } = useApp();
+  const { loginAsAdmin, isAdmin } = useApp();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -28,6 +28,14 @@ export const AdminLoginPage = ({ onLoginSuccess, onNavigateHome }) => {
   const [lockoutSeconds, setLockoutSeconds] = useState(0);
   const [attemptsRemaining, setAttemptsRemaining] = useState(null);
   const [showRecoveryModal, setShowRecoveryModal] = useState(false);
+
+  // If already authenticated, transition directly to dashboard
+  useEffect(() => {
+    if (isAdmin && onLoginSuccess) {
+      console.log('[AdminLogin] Already verified as admin, transitioning to dashboard...');
+      onLoginSuccess();
+    }
+  }, [isAdmin, onLoginSuccess]);
 
   // Lockout countdown timer
   useEffect(() => {
@@ -73,17 +81,21 @@ export const AdminLoginPage = ({ onLoginSuccess, onNavigateHome }) => {
 
     setIsLoading(true);
     setErrorMessage('');
+    console.log('[AdminLogin] Initiating login for email:', email.trim());
 
     try {
       const res = await loginAdminWithEmailAndPassword(email, password);
       setIsLoading(false);
+      console.log('[AdminLogin] Received server response:', { success: res.success, status: res.status });
 
       if (res.success && res.user) {
+        console.log('[AdminLogin] Login successful! Initializing administrator session...');
         loginAsAdmin(res.user);
         if (onLoginSuccess) {
           onLoginSuccess(res.user);
         }
       } else {
+        console.error('[AdminLogin] Login rejected by server:', res);
         if (res.status === 429) {
           setLockoutSeconds(900); // 15 mins default
           setErrorMessage(res.error || 'Too many failed login attempts. Security lockout in effect.');
@@ -96,6 +108,7 @@ export const AdminLoginPage = ({ onLoginSuccess, onNavigateHome }) => {
       }
     } catch (err) {
       setIsLoading(false);
+      console.error('[AdminLogin] Network or client exception:', err);
       setErrorMessage('Network connection error. Please verify your connection and try again.');
     }
   };
@@ -173,7 +186,15 @@ export const AdminLoginPage = ({ onLoginSuccess, onNavigateHome }) => {
           )}
 
           {/* Main Login Form */}
-          <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+          <form 
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleSubmit(e);
+            }} 
+            action="#" 
+            className="space-y-4" 
+            noValidate
+          >
             
             {/* Email Field */}
             <div>
@@ -271,7 +292,8 @@ export const AdminLoginPage = ({ onLoginSuccess, onNavigateHome }) => {
 
             {/* Submit Button */}
             <button
-              type="submit"
+              type="button"
+              onClick={handleSubmit}
               disabled={isLoading || lockoutSeconds > 0}
               className="w-full py-3.5 px-4 rounded-xl font-bold text-xs text-white bg-[#B3122B] hover:bg-[#8B0D20] shadow-md shadow-[#B3122B]/20 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             >

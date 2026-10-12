@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { 
   SEED_TASKS, 
   SPRINT_SCHEDULE, 
@@ -683,7 +683,7 @@ export const AppProvider = ({ children }) => {
     return [];
   });
 
-  const logVerification = (certificateId, result, details = {}) => {
+  const logVerification = useCallback((certificateId, result, details = {}) => {
     const entry = {
       id: `ver-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       certificateId,
@@ -693,11 +693,13 @@ export const AppProvider = ({ children }) => {
     };
     setVerificationLogs(prev => {
       const next = [entry, ...prev.slice(0, 199)];
-      localStorage.setItem('technova_verification_logs', JSON.stringify(next));
+      try {
+        localStorage.setItem('technova_verification_logs', JSON.stringify(next));
+      } catch (e) {}
       return next;
     });
     return entry;
-  };
+  }, []);
 
   // Proctoring Flags state (Section 5)
   const [proctoringFlags, setProctoringFlags] = useState(() => {
@@ -800,6 +802,7 @@ export const AppProvider = ({ children }) => {
 
   // Server-Verified Administrator Session State
   const [isServerAdminAuthenticated, setIsServerAdminAuthenticated] = useState(false);
+  const [isSessionLoading, setIsSessionLoading] = useState(true);
 
   // Synchronize and verify administrator session with server-side HttpOnly session cookie
   useEffect(() => {
@@ -811,8 +814,11 @@ export const AppProvider = ({ children }) => {
         setIsServerAdminAuthenticated(false);
         setUser(prev => (prev?.role === 'admin' ? null : prev));
       }
-    }).catch(() => {
+    }).catch((err) => {
+      console.warn('[AppContext] checkAdminSession error:', err);
       setIsServerAdminAuthenticated(false);
+    }).finally(() => {
+      setIsSessionLoading(false);
     });
   }, []);
 
@@ -1106,6 +1112,7 @@ export const AppProvider = ({ children }) => {
       user,
       setUser,
       isAdmin,
+      isSessionLoading,
       isVedantAdmin,
       loginAsAdmin,
       logoutAdmin,

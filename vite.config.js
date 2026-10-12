@@ -22,6 +22,11 @@ export default defineConfig({
     tailwindcss(),
     apiPlugin(),
   ],
+  server: {
+    watch: {
+      ignored: ['**/data-store.json', '**/scripts/**']
+    }
+  },
   build: {
     chunkSizeWarningLimit: 600,
     rollupOptions: {

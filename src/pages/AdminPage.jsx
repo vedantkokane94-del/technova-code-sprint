@@ -163,6 +163,7 @@ export const AdminPage = ({ setCurrentTab }) => {
 
   // Task editor state
   const [editingTask, setEditingTask] = useState(null);
+  const [selectedStudentForTrackWindow, setSelectedStudentForTrackWindow] = useState(null);
 
   // Certificate & Email Delivery State (Section 9)
   const [selectedStudentForCertModal, setSelectedStudentForCertModal] = useState(null);

@@ -10,13 +10,14 @@ import { AdminPage } from './pages/AdminPage';
 import { AdminLoginPage } from './pages/AdminLoginPage';
 import { MyCertificatePage } from './pages/MyCertificatePage';
 import { VerifyCertificatePage } from './pages/VerifyCertificatePage';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { SVITHubLogo, DurgaMataSketch, ShaktiVidyaWatermark } from './components/BrandLogo';
 
 function SprintApp() {
   const [currentTab, setCurrentTab] = useState('landing');
   const [selectedDay, setSelectedDay] = useState(1);
   const [verifyCertId, setVerifyCertId] = useState('');
-  const { user, isAdmin } = useApp();
+  const { user, isAdmin, isSessionLoading } = useApp();
 
   const ADMIN_ROUTE_PATH = (import.meta.env.VITE_ADMIN_PATH || '/svit-lead-command-2026').replace(/\/$/, '');
 
@@ -29,7 +30,7 @@ function SprintApp() {
 
       // 1. Explicit Admin Login Route: /admin/login
       if (pathname === '/admin/login' || hash === '#admin/login') {
-        if (isAdmin) {
+        if (!isSessionLoading && isAdmin) {
           setCurrentTab('admin');
           window.history.replaceState(null, '', '/admin');
         } else {
@@ -40,7 +41,9 @@ function SprintApp() {
 
       // 2. Protected Admin Dashboard Route: /admin
       if (pathname === '/admin' || hash === '#admin') {
-        if (isAdmin) {
+        if (isSessionLoading) {
+          setCurrentTab('admin');
+        } else if (isAdmin) {
           setCurrentTab('admin');
         } else {
           // Unauthenticated visitors to /admin are directed to /admin/login
@@ -65,21 +68,23 @@ function SprintApp() {
         return;
       }
 
-      if (pathname.includes('/verify/')) {
-        const id = pathname.split('/verify/')[1]?.replace(/\/$/, '');
-        if (id) {
-          setVerifyCertId(id);
-          setCurrentTab('verify');
+      // 4. Certificate Verification Route: /verify or /verify/:id
+      if (pathname === '/verify' || pathname.startsWith('/verify/') || hash === '#verify' || hash.startsWith('#verify/')) {
+        let id = '';
+        if (pathname.includes('/verify/')) {
+          id = decodeURIComponent(pathname.split('/verify/')[1] || '').split('?')[0].split('#')[0].replace(/\/$/, '');
+        } else if (hash.includes('#verify/')) {
+          id = decodeURIComponent(hash.split('#verify/')[1] || '').split('?')[0].replace(/\/$/, '');
+        } else if (searchParams.get('verify')) {
+          id = decodeURIComponent(searchParams.get('verify')).trim();
         }
-      } else if (hash.includes('#verify/')) {
-        const id = hash.split('#verify/')[1];
-        if (id) {
-          setVerifyCertId(id);
-          setCurrentTab('verify');
-        }
-      } else if (searchParams.get('verify')) {
-        setVerifyCertId(searchParams.get('verify'));
+        setVerifyCertId(id);
         setCurrentTab('verify');
+        return;
+      } else if (searchParams.get('verify')) {
+        setVerifyCertId(decodeURIComponent(searchParams.get('verify')).trim());
+        setCurrentTab('verify');
+        return;
       }
     };
 
@@ -90,7 +95,7 @@ function SprintApp() {
       window.removeEventListener('popstate', checkRoute);
       window.removeEventListener('hashchange', checkRoute);
     };
-  }, []);
+  }, [isAdmin, isSessionLoading]);
 
   return (
     <div className="min-h-screen flex flex-col bg-[#FCF9F2] dark:bg-[#0F1115] text-[#1A1A1A] dark:text-[#E2E8F0] transition-colors relative">
@@ -154,7 +159,13 @@ function SprintApp() {
         )}
 
         {currentTab === 'admin' && (
-          isAdmin ? (
+          isSessionLoading ? (
+            <div className="min-h-[50vh] flex flex-col items-center justify-center p-8 text-center">
+              <div className="w-12 h-12 rounded-full border-4 border-[#8B0D20]/20 border-t-[#8B0D20] animate-spin mb-4" />
+              <h3 className="text-sm font-bold text-[#1A1A1A] dark:text-white">Verifying Administrator Session...</h3>
+              <p className="text-xs text-gray-500 mt-1">Checking secure session credentials with the server</p>
+            </div>
+          ) : isAdmin ? (
             <AdminPage setCurrentTab={setCurrentTab} />
           ) : (
             <AdminLoginPage 
@@ -204,9 +215,11 @@ function SprintApp() {
 
 export default function App() {
   return (
-    <AppProvider>
-      <SprintApp />
-    </AppProvider>
+    <ErrorBoundary>
+      <AppProvider>
+        <SprintApp />
+      </AppProvider>
+    </ErrorBoundary>
   );
 }
 
