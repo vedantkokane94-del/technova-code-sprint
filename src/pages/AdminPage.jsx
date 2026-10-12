@@ -72,7 +72,6 @@ export const AdminPage = ({ setCurrentTab }) => {
     updateProctoringFlag,
     emailLogs,
     addEmailLog,
-    seedDemoEligibleData,
     user,
     isAdmin,
     loginAsAdmin

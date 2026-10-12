@@ -38,9 +38,9 @@ export const AppProvider = ({ children }) => {
     return null; // Ready for new student registration
   });
 
-  // Ensure clean fresh start for new students across browser sessions
+  // Ensure clean fresh start: remove all existing student and certificate data across browser sessions
   useEffect(() => {
-    const DATA_EPOCH = "technova_svit_pristine_production_launch_2026_v8";
+    const DATA_EPOCH = "technova_svit_pristine_clean_launch_2026_v10";
     if (localStorage.getItem("technova_epoch") !== DATA_EPOCH) {
       const savedTheme = localStorage.getItem("technova_theme");
       localStorage.clear();
@@ -52,6 +52,8 @@ export const AppProvider = ({ children }) => {
       setCertificates([]);
       setManualOverrides({});
       setEmailLogs([]);
+      setProctoringFlags([]);
+      setVerificationLogs([]);
       setCurrentDay(1);
     }
   }, []);
@@ -441,168 +443,6 @@ export const AppProvider = ({ children }) => {
     }
   };
 
-  // Seed rich demo dataset with 9-day completions for testing
-  const seedDemoEligibleData = () => {
-    const demoStudents = [
-      {
-        uid: "svit-stud-01",
-        name: "Shruti Kulkarni",
-        email: "shruti.kulkarni@svit.ac.in",
-        prn: "SVIT2024CS112",
-        year: "Third Year (TE)",
-        branch: "Computer Engineering",
-        track: "Web",
-        role: "student"
-      },
-      {
-        uid: "svit-stud-02",
-        name: "Rohan Patil",
-        email: "rohan.patil@svit.ac.in",
-        prn: "SVIT2024EC045",
-        year: "Third Year (TE)",
-        branch: "ECE",
-        track: "DSA",
-        role: "student"
-      },
-      {
-        uid: "svit-stud-03",
-        name: "Neha Deshmukh",
-        email: "neha.deshmukh@svit.ac.in",
-        prn: "SVIT2023IT028",
-        year: "Final Year (BE)",
-        branch: "Information Technology",
-        track: "App",
-        role: "student"
-      },
-      {
-        uid: "svit-stud-04",
-        name: "Aditya Pawar",
-        email: "aditya.pawar@svit.ac.in",
-        prn: "SVIT2025CH094",
-        year: "Second Year (SE)",
-        branch: "Chemical Engineering",
-        track: "Python",
-        role: "student"
-      },
-      {
-        uid: "svit-stud-05",
-        name: "Tanmay Joshi",
-        email: "tanmay.joshi@svit.ac.in",
-        prn: "SVIT2024CS089",
-        year: "Third Year (TE)",
-        branch: "Computer Engineering",
-        track: "Web",
-        role: "student"
-      }
-    ];
-
-    const demoSubmissions = [];
-    // Student 1, 2, 3: Completed all 9 days!
-    [demoStudents[0], demoStudents[1], demoStudents[2]].forEach(s => {
-      for (let day = 1; day <= 9; day++) {
-        demoSubmissions.push({
-          id: `sub-${s.uid}-day-${day}`,
-          userId: s.uid,
-          studentName: s.name,
-          prn: s.prn,
-          day,
-          track: s.track,
-          variant: 'A',
-          githubRepo: `https://github.com/${s.name.toLowerCase().replace(/\s+/g, '')}/technova-day-${day}`,
-          solutionNote: `Architected complete day ${day} challenge with clean test passes and structured commit timeline.`,
-          submittedAt: new Date(Date.now() - (10 - day) * 86400000).toISOString(),
-          status: 'approved',
-          points: 100,
-          tabSwitches: 1,
-          commitCount: 4,
-          vivaRequired: false,
-          failedViva: false
-        });
-      }
-    });
-
-    // Student 4: Completed Days 1-8 (Day 9 missing) -> Ineligible automatically
-    for (let day = 1; day <= 8; day++) {
-      const s = demoStudents[3];
-      demoSubmissions.push({
-        id: `sub-${s.uid}-day-${day}`,
-        userId: s.uid,
-        studentName: s.name,
-        prn: s.prn,
-        day,
-        track: s.track,
-        variant: 'B',
-        githubRepo: `https://github.com/adityapawar/day-${day}`,
-        solutionNote: `Built Python solution with type hints and test execution for day ${day}.`,
-        submittedAt: new Date(Date.now() - (10 - day) * 86400000).toISOString(),
-        status: 'approved',
-        points: 90,
-        tabSwitches: 0,
-        commitCount: 3,
-        vivaRequired: false,
-        failedViva: false
-      });
-    }
-
-    // Student 5: Completed Days 1-9, but Day 4 has pending viva flag -> Ineligible until resolved or overridden
-    for (let day = 1; day <= 9; day++) {
-      const s = demoStudents[4];
-      const isDay4 = day === 4;
-      demoSubmissions.push({
-        id: `sub-${s.uid}-day-${day}`,
-        userId: s.uid,
-        studentName: s.name,
-        prn: s.prn,
-        day,
-        track: s.track,
-        variant: 'A',
-        githubRepo: `https://github.com/tanmayjoshi/day-${day}`,
-        solutionNote: `Integrated responsive layout for day ${day}.`,
-        submittedAt: new Date(Date.now() - (10 - day) * 86400000).toISOString(),
-        status: isDay4 ? 'flagged' : 'approved',
-        points: isDay4 ? 50 : 100,
-        tabSwitches: isDay4 ? 5 : 2,
-        commitCount: 2,
-        vivaRequired: isDay4,
-        failedViva: false
-      });
-    }
-
-    saveStudents(demoStudents);
-    saveSubmissions(demoSubmissions);
-    setSprintDay(9);
-
-    // Also pre-issue 1 certificate for Student 1 to showcase status
-    const initialCerts = [
-      {
-        certificateId: "TNV-CS-2026-0001",
-        userId: demoStudents[0].uid,
-        studentName: demoStudents[0].name,
-        prn: demoStudents[0].prn,
-        email: demoStudents[0].email,
-        track: demoStudents[0].track,
-        startDate: SPRINT_START_DATE,
-        endDate: SPRINT_END_DATE,
-        issuedDate: SPRINT_ISSUE_DATE,
-        status: 'sent',
-        sentAt: new Date(Date.now() - 3600000).toLocaleString(),
-        errorReason: null
-      }
-    ];
-    saveCertificates(initialCerts);
-
-    addEmailLog({
-      id: `log-seed-1`,
-      recipientEmail: demoStudents[0].email,
-      studentName: demoStudents[0].name,
-      certificateId: "TNV-CS-2026-0001",
-      sender: "technicalteamsvit@gmail.com",
-      status: "sent",
-      timestamp: new Date(Date.now() - 3600000).toLocaleString(),
-      subject: "Your Technova Code Sprint Certificate"
-    });
-  };
-
   const clearAllData = () => {
     localStorage.removeItem('technova_active_user');
     localStorage.removeItem('technova_submissions');
@@ -610,6 +450,8 @@ export const AppProvider = ({ children }) => {
     localStorage.removeItem('technova_manual_overrides');
     localStorage.removeItem('technova_email_logs');
     localStorage.removeItem('technova_students');
+    localStorage.removeItem('technova_proctoring_flags');
+    localStorage.removeItem('technova_verification_logs');
     localStorage.removeItem('technova_sprint_day');
     setUser(null);
     setSubmissions([]);
@@ -617,6 +459,8 @@ export const AppProvider = ({ children }) => {
     setManualOverrides({});
     setEmailLogs([]);
     setStudents([]);
+    setProctoringFlags([]);
+    setVerificationLogs([]);
     setCurrentDay(1);
   };
 
@@ -888,7 +732,6 @@ export const AppProvider = ({ children }) => {
       proctoringFlags,
       addProctoringFlag,
       updateProctoringFlag,
-      seedDemoEligibleData,
       getNextCertificateId,
       certificates,
       saveCertificates,
