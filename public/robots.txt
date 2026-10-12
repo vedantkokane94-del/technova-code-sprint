@@ -1,0 +1,9 @@
+# Technova SVIT Code Sprint 2026
+# Robots Exclusion Protocol
+User-agent: *
+Disallow: /admin
+Disallow: /api/admin/
+Disallow: /svit-lead-command-2026/
+Disallow: /api/
+Allow: /
+Allow: /verify/

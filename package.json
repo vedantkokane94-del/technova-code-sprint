@@ -9,8 +9,15 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "hash-password": "node scripts/hash-password.js",
+    "admin:hash": "node scripts/hash-password.js",
     "backup-data": "node scripts/reset-production-data.js --backup-only",
-    "reset-data": "node scripts/reset-production-data.js"
+    "reset-data": "node scripts/reset-production-data.js",
+    "admin:reset-device": "node scripts/resetAdminDevice.js",
+    "test:unit": "node scripts/test_unit_scoring.js",
+    "test:e2e": "node scripts/test_e2e_flows.js",
+    "test:security": "node scripts/test_master_security.js",
+    "seed:demo": "node scripts/seed-demo-data.js",
+    "cleanup:demo": "node scripts/cleanup-demo-data.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
@@ -18,6 +25,7 @@
     "firebase": "^13.0.0",
     "html2canvas": "^1.4.1",
     "jspdf": "^4.2.1",
+    "jszip": "^3.10.2",
     "lucide-react": "^1.55.0",
     "pdf-lib": "^1.17.1",
     "qrcode": "^1.5.4",
@@ -30,6 +38,7 @@
     "@types/react-dom": "^19.2.7",
     "@vitejs/plugin-react": "^6.1.1",
     "oxlint": "^1.81.0",
+    "playwright": "^1.64.0",
     "tailwindcss": "^4.3.3",
     "vite": "^8.3.0"
   }

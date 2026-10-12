@@ -76,7 +76,7 @@ export const LandingPage = ({ setCurrentTab }) => {
   ];
 
   return (
-    <div className="min-h-screen bg-[#FCF9F2] dark:bg-[#0F1115] transition-colors pb-20">
+    <div className="min-h-screen bg-[#FCF9F2] dark:bg-[#0F1115] transition-colors pb-20 overflow-x-hidden">
       
       {/* Hero Section */}
       <section className="relative overflow-hidden pt-10 pb-20 sm:pt-16 sm:pb-28 border-b border-[#E8DEC8] dark:border-[#2E3440]">

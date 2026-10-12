@@ -7,6 +7,9 @@ import { QUIZ_QUESTIONS } from '../data/quizSeed';
 import { DAY_POINTS, formatScore, toScoreNumber } from '../utils/scoring';
 import { ProctoringMonitor } from '../components/ProctoringMonitor';
 import { ProctoringConsentModal } from '../components/ProctoringConsentModal';
+import { TaskPreCheckGate } from '../components/TaskPreCheckGate';
+import { QuizJudgingCriteriaModal } from '../components/QuizJudgingCriteriaModal';
+import { reportProctoringExit, checkProctoringStatus, verifySubmissionAllowed, sendTestHeartbeatApi } from '../services/api';
 import confetti from 'canvas-confetti';
 import { 
   Lock, 
@@ -33,7 +36,9 @@ import {
   Cpu,
   EyeOff,
   Video,
-  Eye
+  Eye,
+  Info,
+  Smartphone
 } from 'lucide-react';
 import { SVITHubLogo } from '../components/BrandLogo';
 
@@ -48,7 +53,8 @@ export const TaskPage = ({ dayNumber, setCurrentTab }) => {
     addProctoringFlag,
     hasUserGivenConsent,
     saveUserConsent,
-    getEffectiveServerTime
+    getEffectiveServerTime,
+    examSettings
   } = useApp();
 
   const task = tasks.find(t => t.day === dayNumber) || tasks[0];
@@ -84,7 +90,11 @@ export const TaskPage = ({ dayNumber, setCurrentTab }) => {
   const existingSub = submissions.find(s => s.userId === user?.uid && Number(s.day) === Number(task.day));
 
   // Starter code templates
+  // Starter code templates & draft code recovery
   const getInitialCode = (langId) => {
+    const draft = sessionStorage.getItem(`technova_draft_code_day_${task.day}_${user?.uid}_${langId}`);
+    if (draft && draft.trim()) return draft;
+
     if (existingSub?.code && (existingSub.language?.toLowerCase() === langId || existingSub.track?.toLowerCase() === langId)) {
       return existingSub.code;
     }
@@ -94,12 +104,17 @@ export const TaskPage = ({ dayNumber, setCurrentTab }) => {
 
   const [code, setCode] = useState(() => getInitialCode(defaultLangId));
 
+  const handleCodeChange = (newCode) => {
+    setCode(newCode);
+    if (user?.uid) {
+      sessionStorage.setItem(`technova_draft_code_day_${task.day}_${user.uid}_${selectedLanguage}`, newCode);
+    }
+  };
+
   // Switch language handler
   const handleLanguageChange = (langId) => {
     setSelectedLanguage(langId);
-    if (!existingSub?.code || (existingSub.language?.toLowerCase() !== langId)) {
-      setCode(getInitialCode(langId));
-    }
+    setCode(getInitialCode(langId));
   };
 
   // Progressive Hints
@@ -122,6 +137,20 @@ export const TaskPage = ({ dayNumber, setCurrentTab }) => {
     localStorage.getItem(`proctoring_consent_${user?.uid || 'guest'}`) === 'true';
 
   const [consentGranted, setConsentGranted] = useState(() => userConsentedPreviously);
+
+  // Security Session Token & Device Fingerprint (bound server-side)
+  const [sessionToken, setSessionToken] = useState(() => {
+    return sessionStorage.getItem(`technova_session_token_day_${task.day}`) || null;
+  });
+  const [sessionId, setSessionId] = useState(() => {
+    return sessionStorage.getItem(`technova_session_id_day_${task.day}`) || null;
+  });
+  const [fingerprint, setFingerprint] = useState(() => {
+    return sessionStorage.getItem('technova_fingerprint') || null;
+  });
+  const [isPreCheckPassed, setIsPreCheckPassed] = useState(() => {
+    return Boolean(sessionStorage.getItem(`technova_session_token_day_${task.day}`));
+  });
 
   const [isAlternativeMode, setIsAlternativeMode] = useState(() => {
     return localStorage.getItem(`proctoring_alt_${user?.uid || 'guest'}`) === 'true';
@@ -148,6 +177,61 @@ export const TaskPage = ({ dayNumber, setCurrentTab }) => {
   const [proctoringActive, setProctoringActive] = useState(false);
   const [proctoringGraceActive, setProctoringGraceActive] = useState(false);
   const [proctoringFlagsCount, setProctoringFlagsCount] = useState(0);
+
+  // Pre-Check Gate completion handler
+  const handlePreCheckComplete = (sessionData) => {
+    setSessionToken(sessionData.token);
+    setSessionId(sessionData.sessionId);
+    setFingerprint(sessionData.fingerprint);
+    setIsPreCheckPassed(true);
+    setConsentGranted(true);
+    localStorage.setItem(`proctoring_consent_${user?.uid || 'guest'}`, 'true');
+    if (saveUserConsent) {
+      saveUserConsent(user?.uid, {
+        consentGiven: true,
+        day: task.day,
+        timestamp: new Date().toISOString()
+      });
+    }
+  };
+
+  // Continuous Heartbeat: Every 5s send pulse to server to keep test-session token alive
+  useEffect(() => {
+    if (!sessionToken || isAdmin || user?.role === 'admin') return;
+
+    let consecutiveFailures = 0;
+    const interval = setInterval(async () => {
+      try {
+        const res = await sendTestHeartbeatApi({
+          token: sessionToken,
+          fingerprint,
+          day: task.day,
+          userId: user?.uid
+        });
+
+        if (res.active === false) {
+          clearInterval(interval);
+          handleAutoExit(res.error || "Exited: test session invalidated by server", 'all');
+        } else if (res.warning) {
+          consecutiveFailures++;
+          if (consecutiveFailures >= 3) {
+            clearInterval(interval);
+            handleAutoExit("Exited: verification failed (heartbeat network connection lost beyond threshold)", 'all');
+          }
+        } else {
+          consecutiveFailures = 0;
+        }
+      } catch (err) {
+        consecutiveFailures++;
+        if (consecutiveFailures >= 3) {
+          clearInterval(interval);
+          handleAutoExit("Exited: verification failed (heartbeat signal lost beyond threshold)", 'all');
+        }
+      }
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [sessionToken, fingerprint, task.day, user?.uid, isAdmin]);
 
   const handleConsentAccept = (data = {}) => {
     setConsentGranted(true);
@@ -223,9 +307,81 @@ export const TaskPage = ({ dayNumber, setCurrentTab }) => {
   const [tabSwitches, setTabSwitches] = useState(existingSub?.tabSwitches || 0);
   const [fullScreenExits, setFullScreenExits] = useState(existingSub?.fullScreenExits || 0);
 
-  // Quiz Disqualification State: Tab switching while solving or submitting task disqualifies student from quiz
+  // Section 3: Proctoring Auto-Exit & Permanent Lockout State
+  const [testExitRecord, setTestExitRecord] = useState(() => {
+    if (existingSub?.status === 'exited') {
+      return {
+        reason: existingSub.exitReason || 'Academic integrity violation',
+        timestamp: existingSub.exitedAt || existingSub.submittedAt
+      };
+    }
+    const saved = localStorage.getItem(`test_exited_day_${task.day}_${user?.uid}`);
+    if (saved) {
+      try { return JSON.parse(saved); } catch (e) {}
+    }
+    return null;
+  });
+
+  // Sync lockout from server on mount
+  useEffect(() => {
+    if (!user || isAdmin || user?.role === 'admin') return;
+    checkProctoringStatus(user.uid, task.day).then(res => {
+      if (res?.isLockedOut && res.exitRecord) {
+        const exitObj = {
+          reason: res.exitRecord.reason,
+          timestamp: res.exitRecord.timestamp
+        };
+        setTestExitRecord(exitObj);
+        localStorage.setItem(`test_exited_day_${task.day}_${user.uid}`, JSON.stringify(exitObj));
+      }
+    });
+  }, [user, task.day, isAdmin]);
+
+  // Quiz Modal & Judging Criteria State (Section 2 & 3)
+  const [showJudgingCriteriaModal, setShowJudgingCriteriaModal] = useState(false);
+  const [quizSubmitted, setQuizSubmitted] = useState(() => {
+    return Boolean(
+      existingSub?.quizSubmitted || 
+      (existingSub?.quizScore !== undefined && existingSub?.quizScore !== null) || 
+      existingSub?.quizCorrect !== undefined
+    );
+  });
+  const [quizScoreEarned, setQuizScoreEarned] = useState(existingSub?.quizScore || 0);
+  const [quizCorrectCount, setQuizCorrectCount] = useState(existingSub?.quizCorrect || 0);
+
+  // Restore quiz answers from sessionStorage if mid-attempt refresh occurred
+  const [quizAnswers, setQuizAnswers] = useState(() => {
+    const saved = sessionStorage.getItem(`technova_quiz_answers_day_${task.day}_${user?.uid}`);
+    if (saved) {
+      try { return JSON.parse(saved); } catch (e) {}
+    }
+    return {};
+  });
+
+  // Restore quiz remaining time from sessionStorage if present
+  const [quizTimeLeft, setQuizTimeLeft] = useState(() => {
+    const saved = sessionStorage.getItem(`technova_quiz_time_left_day_${task.day}_${user?.uid}`);
+    if (saved) {
+      const parsed = parseInt(saved, 10);
+      if (!isNaN(parsed) && parsed > 0) return parsed;
+    }
+    return examSettings?.quizTimeLimitSeconds || 600;
+  });
+
+  // Restore quizOpen from sessionStorage if mid-attempt refresh occurred
+  const [quizOpen, setQuizOpen] = useState(() => {
+    const wasOpen = sessionStorage.getItem(`technova_quiz_open_day_${task.day}_${user?.uid}`) === 'true';
+    const isExited = Boolean(existingSub?.status === 'exited' || localStorage.getItem(`test_exited_day_${task.day}_${user?.uid}`));
+    const alreadySub = Boolean(existingSub?.quizSubmitted || (existingSub?.quizScore !== undefined && existingSub?.quizScore !== null));
+    return wasOpen && !isExited && !alreadySub;
+  });
+
+  const [isSubmittingQuiz, setIsSubmittingQuiz] = useState(false);
+  const dayQuizQuestions = QUIZ_QUESTIONS[task.day] || [];
+
+  // Quiz Disqualification State
   const [isQuizDisqualified, setIsQuizDisqualified] = useState(() => {
-    if (existingSub?.quizDisqualified) return true;
+    if (existingSub?.quizDisqualified || existingSub?.status === 'exited') return true;
     const stored = localStorage.getItem(`quiz_disqualified_day_${task.day}_${user?.uid}`);
     if (stored === 'true') return true;
     if (existingSub?.tabSwitches > 0 && !existingSub?.quizSubmitted && !existingSub?.quizScore) return true;
@@ -235,93 +391,172 @@ export const TaskPage = ({ dayNumber, setCurrentTab }) => {
   const [showDisqualificationNotice, setShowDisqualificationNotice] = useState(false);
   const [disqualificationMessage, setDisqualificationMessage] = useState('');
 
-  // Monitor tab switches and window blur (switching tabs/windows while attempting/submitting task disqualifies from quiz)
-  useEffect(() => {
+  // Section 3: Master Auto-Exit Engine (Applies to both Quiz and Program Task)
+  const handleAutoExit = async (reason, testType = 'all', snapshotUrl = null) => {
     if (isAdmin || user?.role === 'admin') return;
+    if (testExitRecord) return; // Already exited
 
-    const handleTabSwitchEvent = (eventType) => {
-      setTabSwitches(prev => {
-        const nextCount = prev + 1;
+    const nowIso = new Date().toISOString();
+    const exitData = { reason, timestamp: nowIso, snapshotUrl };
+    setTestExitRecord(exitData);
+    setIsQuizDisqualified(true);
+    localStorage.setItem(`test_exited_day_${task.day}_${user?.uid}`, JSON.stringify(exitData));
+    localStorage.setItem(`quiz_disqualified_day_${task.day}_${user?.uid}`, 'true');
 
-        // If quiz has not been submitted legitimately, disqualify student from attempting quiz
-        if (!quizSubmitted) {
-          setIsQuizDisqualified(true);
-          localStorage.setItem(`quiz_disqualified_day_${task.day}_${user?.uid}`, 'true');
-          setQuizScoreEarned(0);
-          setQuizCorrectCount(0);
+    // Close any active quiz or modal & exit fullscreen
+    setQuizOpen(false);
+    setShowJudgingCriteriaModal(false);
+    if (document.fullscreenElement && document.exitFullscreen) {
+      document.exitFullscreen().catch(() => {});
+    }
 
-          // If quiz modal is currently open, terminate it immediately
-          setQuizOpen(false);
-          if (document.fullscreenElement && document.exitFullscreen) {
-            document.exitFullscreen().catch(() => {});
-          }
+    // Set disqualification banner
+    setDisqualificationMessage(
+      `Academic integrity violation detected: "${reason}". In accordance with contest rules, your test has ended immediately. Current answers and program code have been auto-submitted and re-entry is locked.`
+    );
+    setShowDisqualificationNotice(true);
 
-          // Trigger warning modal
-          setDisqualificationMessage(
-            `Tab switching was detected while attempting or submitting the Day ${task.day} task (${eventType}). Contest integrity policy strictly prohibits navigating away or switching tabs. You are disqualified from attempting the Day ${task.day} Concept Quiz (0 / ${formatScore(maxQuizPoints)} pts). You can still submit and be evaluated on your program code solution.`
-          );
-          setShowDisqualificationNotice(true);
+    // Server-side enforcement
+    await reportProctoringExit({
+      userId: user?.uid,
+      prn: user?.prn,
+      studentName: user?.name,
+      day: task.day,
+      reason,
+      testType
+    });
 
-          // Log proctoring flag
-          if (addProctoringFlag) {
-            addProctoringFlag({
-              userId: user?.uid,
-              studentName: user?.name,
-              day: task.day,
-              reason: `Disqualified from Quiz: Tab switch / focus loss detected (${eventType}) during task attempt`,
-              timestamp: new Date().toISOString(),
-              status: 'pending'
-            });
-          }
-
-          // Persist disqualification in submission immediately
-          submitTaskSolution({
-            day: task.day,
-            code,
-            language: selectedLanguage,
-            programScore: evaluationResult ? evaluationResult.programScore : (existingSub?.programScore || 0),
-            quizScore: 0,
-            quizCorrect: 0,
-            attempts: attemptsUsed,
-            tabSwitches: nextCount,
-            fullScreenExits,
-            proctoringFlagsCount,
-            quizDisqualified: true,
-            quizDisqualificationReason: `Tab switch detected (${eventType}) while attempting/submitting task`
-          });
-        }
-
-        return nextCount;
+    // Proctoring audit flag
+    if (addProctoringFlag) {
+      addProctoringFlag({
+        userId: user?.uid,
+        studentName: user?.name,
+        day: task.day,
+        reason: `Auto-Exit Enforced: ${reason}`,
+        snapshotUrl,
+        timestamp: nowIso,
+        status: 'pending'
       });
+    }
+
+    // Auto-submit answers and code so far with status: "exited"
+    submitTaskSolution({
+      day: task.day,
+      code,
+      language: selectedLanguage,
+      programScore: evaluationResult ? evaluationResult.programScore : (existingSub?.programScore || 0),
+      quizScore: quizScoreEarned,
+      quizCorrect: quizCorrectCount,
+      attempts: attemptsUsed,
+      tabSwitches: tabSwitches + (reason.includes('tab') ? 1 : 0),
+      fullScreenExits: fullScreenExits + (reason.includes('fullscreen') ? 1 : 0),
+      proctoringFlagsCount: proctoringFlagsCount + 1,
+      quizDisqualified: true,
+      quizDisqualificationReason: reason,
+      status: 'exited',
+      exitReason: reason,
+      exitedAt: nowIso
+    });
+  };
+
+  // Section 3: Disable copy, paste, cut, right-click, and developer shortcuts
+  useEffect(() => {
+    if (isAdmin || user?.role === 'admin' || testExitRecord) return;
+
+    const preventClipboard = (e) => {
+      e.preventDefault();
     };
 
-    const handleVisibility = () => {
-      if (document.hidden) {
-        handleTabSwitchEvent('tab switched / document hidden');
+    const preventContextMenu = (e) => {
+      e.preventDefault();
+    };
+
+    const handleKeyDown = (e) => {
+      // F12 key
+      if (e.key === 'F12') {
+        e.preventDefault();
+        return;
+      }
+      // Devtools shortcuts: Ctrl+Shift+I, Ctrl+Shift+J, Ctrl+Shift+C
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && ['i', 'j', 'c', 'I', 'J', 'C'].includes(e.key)) {
+        e.preventDefault();
+        return;
+      }
+      // View Source shortcut: Ctrl+U
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'u' || e.key === 'U')) {
+        e.preventDefault();
+        return;
+      }
+      // Clipboard shortcuts during quiz
+      if (quizOpen && (e.ctrlKey || e.metaKey) && ['c', 'v', 'x', 'a', 'C', 'V', 'X', 'A'].includes(e.key)) {
+        e.preventDefault();
+        return;
       }
     };
 
-    const handleWindowBlur = () => {
-      handleTabSwitchEvent('window lost focus / switched window');
+    document.addEventListener('copy', preventClipboard);
+    document.addEventListener('cut', preventClipboard);
+    document.addEventListener('paste', preventClipboard);
+    document.addEventListener('contextmenu', preventContextMenu);
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.removeEventListener('copy', preventClipboard);
+      document.removeEventListener('cut', preventClipboard);
+      document.removeEventListener('paste', preventClipboard);
+      document.removeEventListener('contextmenu', preventContextMenu);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isAdmin, user, testExitRecord, quizOpen]);
+
+  // Section 3: Tab / Window Switching Detection (visibilitychange & blur) -> Immediate Auto-Exit
+  useEffect(() => {
+    if (isAdmin || user?.role === 'admin' || testExitRecord) return;
+
+    const handleVisibility = () => {
+      if (document.hidden) {
+        setTabSwitches(prev => prev + 1);
+        handleAutoExit("Exited: tab switch", quizOpen ? 'quiz' : 'all');
+      }
+    };
+
+    const handleBlur = () => {
+      setTabSwitches(prev => prev + 1);
+      handleAutoExit("Exited: tab switch (window blur)", quizOpen ? 'quiz' : 'all');
     };
 
     document.addEventListener('visibilitychange', handleVisibility);
-    window.addEventListener('blur', handleWindowBlur);
+    window.addEventListener('blur', handleBlur);
 
     return () => {
       document.removeEventListener('visibilitychange', handleVisibility);
-      window.removeEventListener('blur', handleWindowBlur);
+      window.removeEventListener('blur', handleBlur);
     };
-  }, [isAdmin, user, task.day, quizSubmitted, code, selectedLanguage, evaluationResult, existingSub, attemptsUsed, fullScreenExits, proctoringFlagsCount, maxQuizPoints]);
+  }, [isAdmin, user, testExitRecord, quizOpen, code, selectedLanguage, evaluationResult, existingSub, attemptsUsed, tabSwitches, fullScreenExits, proctoringFlagsCount, quizScoreEarned, quizCorrectCount]);
 
-  // Quiz Modal State (Section 5 & 7)
-  const [quizOpen, setQuizOpen] = useState(false);
-  const [quizAnswers, setQuizAnswers] = useState({});
-  const [quizSubmitted, setQuizSubmitted] = useState(Boolean(existingSub?.quizScore !== undefined && existingSub?.quizScore > 0));
-  const [quizScoreEarned, setQuizScoreEarned] = useState(existingSub?.quizScore || 0);
-  const [quizCorrectCount, setQuizCorrectCount] = useState(existingSub?.quizCorrect || 0);
-  const [quizTimeLeft, setQuizTimeLeft] = useState(600); // 10 minutes
-  const dayQuizQuestions = QUIZ_QUESTIONS[task.day] || [];
+  // Section 3: Fullscreen exit tracking -> Immediate Auto-Exit
+  useEffect(() => {
+    if (isAdmin || user?.role === 'admin' || testExitRecord) return;
+
+    const handleFullscreenChange = () => {
+      if (quizOpen && !document.fullscreenElement) {
+        setFullScreenExits(prev => prev + 1);
+        handleAutoExit("Exited: fullscreen exit", 'quiz');
+      }
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, [isAdmin, user, testExitRecord, quizOpen, code, selectedLanguage, evaluationResult, existingSub, attemptsUsed, tabSwitches, fullScreenExits, proctoringFlagsCount, quizScoreEarned, quizCorrectCount]);
+
+  // Section 3: Device Disconnection & Vision Proctoring Auto-Exits
+  const handleDeviceDisconnected = (reason) => {
+    handleAutoExit(`Exited: ${reason}`, 'all');
+  };
+
+  const handleVisionAutoExit = (violation) => {
+    handleAutoExit(`Exited: ${violation.reason}`, 'all', violation.snapshotUrl);
+  };
 
   // Countdown timer to 11:59 PM IST
   const [timeLeft, setTimeLeft] = useState({ hours: 0, minutes: 0, seconds: 0 });
@@ -348,17 +583,16 @@ export const TaskPage = ({ dayNumber, setCurrentTab }) => {
   }, []);
 
   // Controls disabled when checks inactive and grace period expired (unless alternative mode)
-  const areControlsDisabled = !isAlternativeMode && !proctoringActive && !proctoringGraceActive;
+  const areControlsDisabled = Boolean(testExitRecord) || (!isAlternativeMode && !proctoringActive && !proctoringGraceActive);
 
   // Run Sample Tests
   const handleRunSampleTests = () => {
-    if (areControlsDisabled) return;
+    if (areControlsDisabled || testExitRecord) return;
     setIsRunningSample(true);
     setSampleRunResult(null);
 
     setTimeout(() => {
       const evalOut = evaluateCodeSubmission(code, selectedLanguage, task.day, assignedVariantKey);
-      // Sample cases are test 1 and 2
       const samples = evalOut.testResults.slice(0, 2).map((t, idx) => ({
         ...t,
         input: idx === 0 ? "Sample Input 1" : "Sample Input 2",
@@ -375,16 +609,24 @@ export const TaskPage = ({ dayNumber, setCurrentTab }) => {
     }, 450);
   };
 
-  // Submit Program
-  const handleSubmitProgram = () => {
-    if (areControlsDisabled) return;
+  // Submit Program (with server-side exit verification)
+  const handleSubmitProgram = async () => {
+    if (areControlsDisabled || testExitRecord || isSubmitting) return;
     if (attemptsUsed >= 3) {
       alert("You have already used all 3 attempts for Day " + task.day + ". Your highest score is preserved.");
       return;
     }
 
     setIsSubmitting(true);
-    setTimeout(() => {
+    try {
+      // Verify with server before submitting (requires active session token)
+      const check = await verifySubmissionAllowed(user?.uid, task.day, 'task', sessionToken, fingerprint);
+      if (!check.allowed) {
+        alert(check.error || "Submission rejected: test has ended due to an academic integrity exit.");
+        setTestExitRecord({ reason: check.exitRecord?.reason || "Server auto-exit lock", timestamp: new Date().toISOString() });
+        return;
+      }
+
       const isCatchup = task.day < currentDay;
       const evalOut = evaluateCodeSubmission(code, selectedLanguage, task.day, assignedVariantKey, { isCatchup });
       setEvaluationResult(evalOut);
@@ -392,7 +634,6 @@ export const TaskPage = ({ dayNumber, setCurrentTab }) => {
       const nextAttempts = attemptsUsed + 1;
       setAttemptsUsed(nextAttempts);
 
-      // Save submission into context
       submitTaskSolution({
         day: task.day,
         code,
@@ -401,15 +642,13 @@ export const TaskPage = ({ dayNumber, setCurrentTab }) => {
         quizScore: isQuizDisqualified ? 0 : quizScoreEarned,
         quizCorrect: isQuizDisqualified ? 0 : quizCorrectCount,
         quizDisqualified: isQuizDisqualified,
-        quizDisqualificationReason: isQuizDisqualified ? "Tab switching detected while attempting or submitting task" : '',
+        quizDisqualificationReason: isQuizDisqualified ? "Tab switching or proctoring exit detected" : '',
         attempts: nextAttempts,
         testResults: evalOut.testResults,
         tabSwitches,
         fullScreenExits,
         proctoringFlagsCount
       });
-
-      setIsSubmitting(false);
 
       if (evalOut.programScore >= maxProgramPoints * 0.7) {
         try {
@@ -420,119 +659,145 @@ export const TaskPage = ({ dayNumber, setCurrentTab }) => {
           });
         } catch (e) {}
       }
-    }, 600);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  // Open Quiz with Fullscreen enforcement (Section 5)
-  const handleOpenQuiz = async () => {
-    if (areControlsDisabled) return;
-    if (isQuizDisqualified) {
-      alert(`You are disqualified from taking the Day ${task.day} quiz due to tab switching.`);
+  // Section 2: Open Quiz triggers Judging Criteria and Guidelines screen first
+  const handleOpenQuiz = () => {
+    if (testExitRecord) {
+      alert("Your test has ended due to an academic integrity auto-exit. Re-entry is locked.");
       return;
     }
+    if (areControlsDisabled) return;
+    if (isQuizDisqualified) {
+      alert(`You are disqualified from taking the Day ${task.day} quiz.`);
+      return;
+    }
+    if (quizSubmitted) {
+      alert(`You have already completed and submitted the Day ${task.day} quiz. Re-submission is not permitted.`);
+      return;
+    }
+    setShowJudgingCriteriaModal(true);
+  };
+
+  // Proceed to Fullscreen Quiz after ticking "I have read and agree"
+  const handleConfirmStartQuiz = async () => {
+    setShowJudgingCriteriaModal(false);
     try {
       if (document.documentElement.requestFullscreen) {
         await document.documentElement.requestFullscreen();
       }
     } catch (e) {
-      console.warn("Fullscreen request:", e);
+      console.warn("Fullscreen request error:", e);
     }
     setQuizOpen(true);
+    if (user?.uid) {
+      sessionStorage.setItem(`technova_quiz_open_day_${task.day}_${user.uid}`, 'true');
+    }
   };
 
-  // Fullscreen exit tracking during Quiz: exiting fullscreen during quiz disqualifies student
-  useEffect(() => {
-    if (!quizOpen) return;
-    const handleFullscreenChange = () => {
-      if (!document.fullscreenElement) {
-        setFullScreenExits(prev => prev + 1);
-        setIsQuizDisqualified(true);
-        localStorage.setItem(`quiz_disqualified_day_${task.day}_${user?.uid}`, 'true');
-        setQuizOpen(false);
-        setQuizScoreEarned(0);
-        setQuizCorrectCount(0);
-        setDisqualificationMessage(
-          `You exited full-screen mode during the quiz session. Exiting full-screen or switching windows during quizzes is an integrity violation. Your quiz has been closed and disqualified with 0 points.`
-        );
-        setShowDisqualificationNotice(true);
-        submitTaskSolution({
-          day: task.day,
-          code,
-          language: selectedLanguage,
-          programScore: evaluationResult ? evaluationResult.programScore : (existingSub?.programScore || 0),
-          quizScore: 0,
-          quizCorrect: 0,
-          attempts: attemptsUsed,
-          tabSwitches: tabSwitches + 1,
-          fullScreenExits: fullScreenExits + 1,
-          proctoringFlagsCount,
-          quizDisqualified: true,
-          quizDisqualificationReason: "Exited fullscreen during quiz session"
-        });
+  // Select quiz answer helper that persists to sessionStorage
+  const handleSelectQuizAnswer = (qIdx, optIdx) => {
+    setQuizAnswers(prev => {
+      const next = { ...prev, [qIdx]: optIdx };
+      if (user?.uid) {
+        sessionStorage.setItem(`technova_quiz_answers_day_${task.day}_${user.uid}`, JSON.stringify(next));
       }
-    };
-    document.addEventListener('fullscreenchange', handleFullscreenChange);
-    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
-  }, [quizOpen, task.day, user?.uid, code, selectedLanguage, evaluationResult, existingSub, attemptsUsed, tabSwitches, fullScreenExits, proctoringFlagsCount]);
+      return next;
+    });
+  };
 
-  // Quiz Timer: pauses during grace period
+  // Quiz Timer: pauses during grace period; auto-submits on timeout
   useEffect(() => {
-    if (!quizOpen || quizSubmitted || proctoringGraceActive) return;
+    if (!quizOpen || quizSubmitted || proctoringGraceActive || testExitRecord) return;
     const interval = setInterval(() => {
       setQuizTimeLeft(prev => {
         if (prev <= 1) {
-          handleQuizSubmit();
+          handleQuizSubmit(); // Auto-submit on timeout
           return 0;
         }
-        return prev - 1;
+        const nextTime = prev - 1;
+        if (user?.uid) {
+          sessionStorage.setItem(`technova_quiz_time_left_day_${task.day}_${user.uid}`, String(nextTime));
+        }
+        return nextTime;
       });
     }, 1000);
     return () => clearInterval(interval);
-  }, [quizOpen, quizSubmitted, proctoringGraceActive]);
+  }, [quizOpen, quizSubmitted, proctoringGraceActive, testExitRecord, user?.uid, task.day]);
 
-  // Submit Quiz
-  const handleQuizSubmit = () => {
-    let correct = 0;
-    dayQuizQuestions.forEach((q, idx) => {
-      if (quizAnswers[idx] === q.correctAnswer) {
-        correct++;
-      }
-    });
-
-    const isCatchup = task.day < currentDay;
-    const catchupMultiplier = isCatchup ? 0.5 : 1.0;
-    const earnedQuiz = toScoreNumber((correct / 8) * maxQuizPoints * catchupMultiplier);
-
-    setQuizCorrectCount(correct);
-    setQuizScoreEarned(earnedQuiz);
-    setQuizSubmitted(true);
-
-    // Update submission with quiz score
-    submitTaskSolution({
-      day: task.day,
-      code,
-      language: selectedLanguage,
-      programScore: evaluationResult ? evaluationResult.programScore : (existingSub?.programScore || 0),
-      quizScore: earnedQuiz,
-      quizCorrect: correct,
-      attempts: attemptsUsed,
-      tabSwitches,
-      fullScreenExits,
-      proctoringFlagsCount
-    });
-
-    // Exit fullscreen
-    if (document.fullscreenElement && document.exitFullscreen) {
-      document.exitFullscreen().catch(() => {});
-    }
+  // Submit Quiz (with negative marking calculation & server check)
+  const handleQuizSubmit = async () => {
+    if (testExitRecord || isSubmittingQuiz || quizSubmitted) return;
+    setIsSubmittingQuiz(true);
 
     try {
-      confetti({
-        particleCount: 50,
-        spread: 50,
-        origin: { y: 0.5 }
+      // Verify with server before submitting (requires active session token)
+      const check = await verifySubmissionAllowed(user?.uid, task.day, 'quiz', sessionToken, fingerprint);
+      if (!check.allowed) {
+        alert(check.error || "Submission rejected: test has ended due to an academic integrity exit.");
+        setTestExitRecord({ reason: check.exitRecord?.reason || "Server auto-exit lock", timestamp: new Date().toISOString() });
+        setQuizOpen(false);
+        return;
+      }
+
+      let correct = 0;
+      let incorrect = 0;
+      dayQuizQuestions.forEach((q, idx) => {
+        if (quizAnswers[idx] === q.correctAnswer) {
+          correct++;
+        } else if (quizAnswers[idx] !== undefined) {
+          incorrect++;
+        }
       });
-    } catch (e) {}
+
+      const isCatchup = task.day < currentDay;
+      const catchupMultiplier = isCatchup ? 0.5 : 1.0;
+      const baseQuizScore = (correct / 8) * maxQuizPoints;
+      const negativePenalty = (examSettings?.negativeMarking || 0) * incorrect;
+      const earnedQuiz = toScoreNumber(Math.max(0, baseQuizScore - negativePenalty) * catchupMultiplier);
+
+      setQuizCorrectCount(correct);
+      setQuizScoreEarned(earnedQuiz);
+      setQuizSubmitted(true);
+      setQuizOpen(false);
+
+      if (user?.uid) {
+        sessionStorage.removeItem(`technova_quiz_open_day_${task.day}_${user.uid}`);
+        sessionStorage.removeItem(`technova_quiz_answers_day_${task.day}_${user.uid}`);
+        sessionStorage.removeItem(`technova_quiz_time_left_day_${task.day}_${user.uid}`);
+      }
+
+      submitTaskSolution({
+        day: task.day,
+        code,
+        language: selectedLanguage,
+        programScore: evaluationResult ? evaluationResult.programScore : (existingSub?.programScore || 0),
+        quizScore: earnedQuiz,
+        quizCorrect: correct,
+        quizSubmitted: true,
+        attempts: attemptsUsed,
+        tabSwitches,
+        fullScreenExits,
+        proctoringFlagsCount
+      });
+
+      if (document.fullscreenElement && document.exitFullscreen) {
+        document.exitFullscreen().catch(() => {});
+      }
+
+      try {
+        confetti({
+          particleCount: 50,
+          spread: 50,
+          origin: { y: 0.5 }
+        });
+      } catch (e) {}
+    } finally {
+      setIsSubmittingQuiz(false);
+    }
   };
 
   // Section 2: Locked Day & Pre-Launch Countdown Screen
@@ -547,13 +812,14 @@ export const TaskPage = ({ dayNumber, setCurrentTab }) => {
 
     return (
       <div className="min-h-screen bg-[#FCF9F2] dark:bg-[#0F1115] py-16 px-4 flex items-center justify-center relative">
-        {/* If consent not yet granted, show consent modal so student can complete it in advance */}
-        {!consentGranted && !isAdmin && (
-          <ProctoringConsentModal
+        {/* Mandatory Pre-Check Gate: Browser Check, Real Consent, Permissions, Liveness & Session Minting */}
+        {!isPreCheckPassed && !isAdmin && (
+          <TaskPreCheckGate
             dayNumber={task.day}
-            onAccept={handleConsentAccept}
-            onAcceptConsent={handleConsentAccept}
-            onRequestAlternative={handleRequestAlternative}
+            user={user}
+            isOpen={!isPreCheckPassed}
+            onComplete={handlePreCheckComplete}
+            onCancel={() => setCurrentTab('dashboard')}
           />
         )}
 
@@ -674,23 +940,31 @@ export const TaskPage = ({ dayNumber, setCurrentTab }) => {
         </div>
       )}
 
-      {/* Proctoring Consent Modal (Section 5) */}
-      {!consentGranted && !isAdmin && (
-        <ProctoringConsentModal
+      {/* Mandatory Pre-Check Gate: Browser Check, Real Consent, Permissions, Liveness & Session Minting */}
+      {!isPreCheckPassed && !isAdmin && (
+        <TaskPreCheckGate
           dayNumber={task.day}
-          onAccept={handleConsentAccept}
-          onAcceptConsent={handleConsentAccept}
-          onRequestAlternative={handleRequestAlternative}
+          user={user}
+          isOpen={!isPreCheckPassed}
+          onComplete={handlePreCheckComplete}
+          onCancel={() => setCurrentTab('dashboard')}
         />
       )}
 
-      {/* Floating Proctoring Monitor (Section 5) */}
+      {/* Floating Proctoring Monitor with AI Vision & Auto-Exit (Section 3) */}
       {!isAdmin && consentGranted && (
         <ProctoringMonitor
-          onStatusChange={setProctoringActive}
-          onGracePeriodChange={setProctoringGraceActive}
-          onFlagCaptured={handleFlagCaptured}
-          isAlternativeMode={isAlternativeMode}
+          dayNumber={task.day}
+          taskTitle={task.title}
+          onStatusChange={(active, inGrace) => {
+            setProctoringActive(active);
+            setProctoringGraceActive(inGrace);
+          }}
+          onFlagEvent={handleFlagCaptured}
+          onViolationAutoExit={handleVisionAutoExit}
+          onDeviceDisconnected={handleDeviceDisconnected}
+          proctoringSettings={examSettings}
+          disabled={Boolean(testExitRecord)}
         />
       )}
 
@@ -762,6 +1036,41 @@ export const TaskPage = ({ dayNumber, setCurrentTab }) => {
           </div>
         </div>
 
+        {/* Test Auto-Exit Permanent Lockout Banner (Section 3) */}
+        {testExitRecord && (
+          <div className="mb-8 p-6 sm:p-8 rounded-3xl bg-red-600 text-white shadow-xl border-2 border-red-700 animate-in fade-in slide-in-from-top-4">
+            <div className="flex items-start gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-white/20 flex items-center justify-center shrink-0">
+                <XCircle className="w-7 h-7 text-white" />
+              </div>
+              <div className="flex-1">
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/20 text-white text-xs font-black uppercase tracking-wider mb-2">
+                  <ShieldAlert className="w-3.5 h-3.5" />
+                  <span>Test Terminated • Re-entry Locked</span>
+                </div>
+                <h2 className="text-xl sm:text-2xl font-black">
+                  Academic Integrity Auto-Exit Enforced
+                </h2>
+                <p className="mt-2 text-sm text-white/90 leading-relaxed font-medium">
+                  Your session for Day {task.day} was terminated due to a confirmed proctoring violation:
+                  <strong className="block text-white mt-1 underline">Reason: {testExitRecord.reason}</strong>
+                </p>
+                <div className="mt-4 pt-4 border-t border-white/20 flex flex-wrap items-center justify-between gap-3 text-xs text-white/80">
+                  <div>
+                    <strong>Exited At:</strong> {new Date(testExitRecord.timestamp).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })} • {new Date(testExitRecord.timestamp).toLocaleDateString('en-GB')}
+                  </div>
+                  <div>
+                    <strong>Server Status:</strong> Locked & Verified on Faculty Command Center
+                  </div>
+                </div>
+                <div className="mt-3 text-xs bg-black/20 p-3 rounded-xl font-medium">
+                  <strong>Notice:</strong> In accordance with SVIT Technova contest regulations, all responses recorded prior to the violation have been auto-submitted. Further attempts and re-entry for Day {task.day} are strictly locked.
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Task Objective Card */}
         <div className="bg-white dark:bg-[#181B20] rounded-3xl p-6 sm:p-8 border border-[#E8DEC8] dark:border-[#2E3440] shadow-sm mb-8">
           <div className="flex items-center justify-between text-xs font-semibold text-gray-500 border-b border-[#E8DEC8]/50 dark:border-[#2E3440] pb-3 mb-5">
@@ -774,27 +1083,30 @@ export const TaskPage = ({ dayNumber, setCurrentTab }) => {
             </span>
           </div>
 
-          {/* Contest Tab-Switch Rule Notice */}
-          <div className={`mb-5 p-3 rounded-2xl border text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2 ${
-            isQuizDisqualified
-              ? 'bg-red-500/10 border-red-500/30 text-red-800 dark:text-red-300'
-              : 'bg-amber-500/10 border-amber-500/20 text-amber-900 dark:text-amber-200'
-          }`}>
-            <div className="flex items-center gap-2">
-              <ShieldAlert className={`w-4 h-4 shrink-0 ${isQuizDisqualified ? 'text-red-600' : 'text-amber-600'}`} />
-              <span>
-                {isQuizDisqualified ? (
-                  <><strong>Quiz Disqualified:</strong> Tab switching was detected during this session. You are disqualified from attempting the quiz.</>
-                ) : (
-                  <><strong>Contest Integrity Rule:</strong> Switching browser tabs or leaving this screen while attempting or submitting the task will <strong>disqualify you from attempting the daily quiz</strong>.</>
-                )}
-              </span>
+          {/* Pre-Test Proctoring & Exam Notice Banner (Section 3) */}
+          <div className="mb-5 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/25 text-xs text-amber-900 dark:text-amber-200">
+            <div className="font-bold flex items-center gap-2 mb-1.5 text-sm text-[#B3122B] dark:text-[#ff8a9e]">
+              <ShieldAlert className="w-4 h-4 shrink-0" />
+              <span>Important Examination & Proctoring Notice</span>
             </div>
-            {tabSwitches > 0 && (
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-300 border border-red-300 dark:border-red-900 shrink-0 self-start sm:self-auto">
-                {tabSwitches} tab switch{tabSwitches > 1 ? 'es' : ''} logged
-              </span>
-            )}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-[11px] leading-relaxed text-gray-700 dark:text-gray-300">
+              <div className="flex items-start gap-1.5">
+                <span className="font-bold text-[#B3122B]">•</span>
+                <span><strong>Camera & Mic Mandatory:</strong> Must remain active. Turning off devices ends the test immediately.</span>
+              </div>
+              <div className="flex items-start gap-1.5">
+                <span className="font-bold text-[#B3122B]">•</span>
+                <span><strong>No Tab / Window Switching:</strong> Switching tabs or losing focus triggers immediate auto-exit and locks re-entry.</span>
+              </div>
+              <div className="flex items-start gap-1.5">
+                <span className="font-bold text-[#B3122B]">•</span>
+                <span><strong>AI Vision Proctoring:</strong> Mobile phones, secondary persons, or absence from screen (&gt;10s) trigger immediate exit.</span>
+              </div>
+              <div className="flex items-start gap-1.5">
+                <span className="font-bold text-[#B3122B]">•</span>
+                <span><strong>Lockdown Enforced:</strong> Copy/paste, devtools (F12), right-click disabled. Fullscreen mode enforced.</span>
+              </div>
+            </div>
           </div>
 
           <div className="space-y-4">
@@ -942,7 +1254,7 @@ export const TaskPage = ({ dayNumber, setCurrentTab }) => {
           <div className="relative rounded-2xl overflow-hidden border border-[#E8DEC8] dark:border-[#2E3440] bg-[#1E232B] text-gray-100 font-mono text-xs shadow-inner">
             <textarea
               value={code}
-              onChange={(e) => setCode(e.target.value)}
+              onChange={(e) => handleCodeChange(e.target.value)}
               rows={15}
               spellCheck={false}
               className="w-full p-4 bg-transparent outline-none resize-y leading-relaxed font-mono"
@@ -1182,9 +1494,13 @@ export const TaskPage = ({ dayNumber, setCurrentTab }) => {
                 </div>
 
                 <button
-                  onClick={() => setQuizOpen(false)}
+                  onClick={() => {
+                    if (window.confirm("Warning: Leaving the active quiz session will auto-submit your answers recorded so far. Are you sure you want to submit and exit?")) {
+                      handleQuizSubmit();
+                    }
+                  }}
                   className="p-2 rounded-xl text-gray-400 hover:text-gray-600 cursor-pointer"
-                  title="Close Quiz Modal"
+                  title="Submit & Exit Quiz"
                 >
                   <Minimize2 className="w-4 h-4" />
                 </button>
@@ -1214,7 +1530,7 @@ export const TaskPage = ({ dayNumber, setCurrentTab }) => {
                         <button
                           key={optIdx}
                           type="button"
-                          onClick={() => setQuizAnswers(prev => ({ ...prev, [qIdx]: optIdx }))}
+                          onClick={() => handleSelectQuizAnswer(qIdx, optIdx)}
                           className={`p-3 rounded-xl border text-left text-xs font-semibold transition-all flex items-center gap-2.5 cursor-pointer ${
                             isSelected
                               ? 'bg-[#B3122B]/10 dark:bg-[#B3122B]/20 border-[#B3122B] text-[#B3122B] dark:text-[#ff8a9e]'
@@ -1242,9 +1558,14 @@ export const TaskPage = ({ dayNumber, setCurrentTab }) => {
               </div>
               <button
                 onClick={handleQuizSubmit}
-                className="px-6 py-2.5 rounded-xl text-xs font-bold bg-[#B3122B] text-white hover:bg-[#8B0D20] shadow-md shadow-[#B3122B]/20 cursor-pointer"
+                disabled={isSubmittingQuiz}
+                className={`px-6 py-2.5 rounded-xl text-xs font-bold transition-all shadow-md ${
+                  isSubmittingQuiz
+                    ? 'bg-gray-400 text-white cursor-not-allowed'
+                    : 'bg-[#B3122B] text-white hover:bg-[#8B0D20] shadow-[#B3122B]/20 cursor-pointer'
+                }`}
               >
-                Submit & Grade Quiz
+                {isSubmittingQuiz ? "Submitting & Grading..." : "Submit & Grade Quiz"}
               </button>
             </div>
 
@@ -1276,6 +1597,17 @@ export const TaskPage = ({ dayNumber, setCurrentTab }) => {
             </button>
           </div>
         </div>
+      )}
+
+      {/* Pre-Quiz Judging Criteria & Examination Guidelines Modal (Section 2) */}
+      {showJudgingCriteriaModal && (
+        <QuizJudgingCriteriaModal
+          dayNumber={task.day}
+          maxQuizPoints={maxQuizPoints}
+          examSettings={examSettings}
+          onAcceptAndProceed={handleConfirmStartQuiz}
+          onClose={() => setShowJudgingCriteriaModal(false)}
+        />
       )}
 
     </div>

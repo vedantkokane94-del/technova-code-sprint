@@ -7,6 +7,7 @@ import { DashboardPage } from './pages/DashboardPage';
 import { TaskPage } from './pages/TaskPage';
 import { LeaderboardPage } from './pages/LeaderboardPage';
 import { AdminPage } from './pages/AdminPage';
+import { AdminLoginPage } from './pages/AdminLoginPage';
 import { MyCertificatePage } from './pages/MyCertificatePage';
 import { VerifyCertificatePage } from './pages/VerifyCertificatePage';
 import { SVITHubLogo, DurgaMataSketch, ShaktiVidyaWatermark } from './components/BrandLogo';
@@ -17,12 +18,52 @@ function SprintApp() {
   const [verifyCertId, setVerifyCertId] = useState('');
   const { user, isAdmin } = useApp();
 
-  // Listen for direct URL routes e.g. /verify/TNV-CS-2026-0001 or hash /#verify/ID
+  const ADMIN_ROUTE_PATH = (import.meta.env.VITE_ADMIN_PATH || '/svit-lead-command-2026').replace(/\/$/, '');
+
+  // Listen for direct URL routes e.g. /admin/login, /admin, /verify/ID
   React.useEffect(() => {
     const checkRoute = () => {
-      const pathname = window.location.pathname;
-      const hash = window.location.hash;
+      const pathname = window.location.pathname.replace(/\/$/, '');
+      const hash = window.location.hash.replace(/\/$/, '');
       const searchParams = new URLSearchParams(window.location.search);
+
+      // 1. Explicit Admin Login Route: /admin/login
+      if (pathname === '/admin/login' || hash === '#admin/login') {
+        if (isAdmin) {
+          setCurrentTab('admin');
+          window.history.replaceState(null, '', '/admin');
+        } else {
+          setCurrentTab('admin-login');
+        }
+        return;
+      }
+
+      // 2. Protected Admin Dashboard Route: /admin
+      if (pathname === '/admin' || hash === '#admin') {
+        if (isAdmin) {
+          setCurrentTab('admin');
+        } else {
+          // Unauthenticated visitors to /admin are directed to /admin/login
+          setCurrentTab('admin-login');
+          window.history.replaceState(null, '', '/admin/login');
+        }
+        return;
+      }
+
+      // 3. Obfuscated Admin Route fallback
+      if (
+        pathname === ADMIN_ROUTE_PATH || 
+        hash === `#${ADMIN_ROUTE_PATH}` ||
+        pathname === `${ADMIN_ROUTE_PATH}/auth/setup` ||
+        hash === `#${ADMIN_ROUTE_PATH}/auth/setup`
+      ) {
+        if (isAdmin) {
+          setCurrentTab('admin');
+        } else {
+          setCurrentTab('admin-login');
+        }
+        return;
+      }
 
       if (pathname.includes('/verify/')) {
         const id = pathname.split('/verify/')[1]?.replace(/\/$/, '');
@@ -99,8 +140,34 @@ function SprintApp() {
           />
         )}
 
+        {currentTab === 'admin-login' && (
+          <AdminLoginPage 
+            onLoginSuccess={() => {
+              setCurrentTab('admin');
+              window.history.pushState(null, '', '/admin');
+            }}
+            onNavigateHome={() => {
+              setCurrentTab('landing');
+              window.history.pushState(null, '', '/');
+            }}
+          />
+        )}
+
         {currentTab === 'admin' && (
-          <AdminPage setCurrentTab={setCurrentTab} />
+          isAdmin ? (
+            <AdminPage setCurrentTab={setCurrentTab} />
+          ) : (
+            <AdminLoginPage 
+              onLoginSuccess={() => {
+                setCurrentTab('admin');
+                window.history.pushState(null, '', '/admin');
+              }}
+              onNavigateHome={() => {
+                setCurrentTab('landing');
+                window.history.pushState(null, '', '/');
+              }}
+            />
+          )
         )}
       </main>
 

@@ -52,15 +52,15 @@ export const Navbar = ({ currentTab, setCurrentTab }) => {
           {/* Section 6B Left: Hub logo (40px) + Title on one line, subtitle below */}
           <div 
             onClick={() => handleNavClick('landing')}
-            className="flex items-center gap-3 cursor-pointer min-w-0 shrink-0"
+            className="flex items-center gap-2 sm:gap-3 cursor-pointer min-w-0"
           >
-            <div className="w-10 h-10 shrink-0 flex items-center justify-center">
-              <SVITHubLogo className="w-10 h-10" />
+            <div className="w-8 h-8 sm:w-10 sm:h-10 shrink-0 flex items-center justify-center">
+              <SVITHubLogo className="w-8 h-8 sm:w-10 sm:h-10" />
             </div>
 
             <div className="min-w-0 text-left">
               <div className="flex items-center gap-2 whitespace-nowrap overflow-hidden text-ellipsis">
-                <span className="font-extrabold text-base sm:text-lg tracking-tight text-[#1A1A1A] dark:text-white whitespace-nowrap">
+                <span className="font-extrabold text-sm sm:text-lg tracking-tight text-[#1A1A1A] dark:text-white whitespace-nowrap">
                   Technova <span className="text-[#B3122B]">Code Sprint</span>
                 </span>
                 <span className="hidden md:inline-block text-[9.5px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-[#B3122B]/10 dark:bg-[#B3122B]/30 text-[#B3122B] dark:text-[#ff8a9e]">
@@ -194,20 +194,18 @@ export const Navbar = ({ currentTab, setCurrentTab }) => {
             );
           })}
 
-          <div className="pt-2 border-t border-[#E8DEC8] dark:border-[#2E3440] flex justify-between items-center text-xs">
-            <span className="text-gray-500 font-medium">Faculty / Mentor:</span>
-            <button
-              onClick={() => handleNavClick('admin')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1 cursor-pointer ${
-                isAdmin 
-                  ? 'bg-[#B3122B] text-white' 
-                  : 'bg-white dark:bg-[#1E232B] border border-[#E8DEC8] dark:border-[#2E3440] text-gray-700 dark:text-gray-200'
-              }`}
-            >
-              <ShieldCheck className="w-3.5 h-3.5" />
-              <span>{isAdmin ? 'Admin Dashboard' : 'Admin Login'}</span>
-            </button>
-          </div>
+          {isAdmin && (
+            <div className="pt-2 border-t border-[#E8DEC8] dark:border-[#2E3440] flex justify-between items-center text-xs">
+              <span className="text-gray-500 font-medium">Faculty / Mentor:</span>
+              <button
+                onClick={() => handleNavClick('admin')}
+                className="px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1 cursor-pointer bg-[#B3122B] text-white"
+              >
+                <ShieldCheck className="w-3.5 h-3.5" />
+                <span>Admin Dashboard</span>
+              </button>
+            </div>
+          )}
         </div>
       )}
     </header>

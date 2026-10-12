@@ -1,5 +1,62 @@
 import QRCode from 'qrcode';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
+import JSZip from 'jszip';
+
+// Canonical Public Base URL for QR verification (NEVER localhost)
+export function getPublicBaseUrl() {
+  const envUrl = (typeof process !== 'undefined' && process.env?.PUBLIC_BASE_URL) ||
+                 (typeof import.meta !== 'undefined' && import.meta.env?.VITE_PUBLIC_BASE_URL) ||
+                 (typeof import.meta !== 'undefined' && import.meta.env?.VITE_APP_URL);
+  if (envUrl && !envUrl.includes('localhost') && !envUrl.includes('127.0.0.1')) {
+    return envUrl.replace(/\/$/, '');
+  }
+  if (typeof window !== 'undefined' && window.location?.origin && !window.location.origin.includes('localhost') && !window.location.origin.includes('127.0.0.1')) {
+    return window.location.origin.replace(/\/$/, '');
+  }
+  // Safe default: official college canonical domain
+  return 'https://technova.svit.ac.in';
+}
+
+// Generate random non-guessable certificate ID: CERT-2026-XXXXXXXX
+export function generateCertificateId() {
+  const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+  let rand = '';
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+    const bytes = new Uint8Array(8);
+    crypto.getRandomValues(bytes);
+    for (let i = 0; i < 8; i++) {
+      rand += chars[bytes[i] % chars.length];
+    }
+  } else {
+    for (let i = 0; i < 8; i++) {
+      rand += chars[Math.floor(Math.random() * chars.length)];
+    }
+  }
+  return `CERT-2026-${rand}`;
+}
+
+// Compute certificate type (Winner / Merit / Participation)
+export function determineCertificateType(score, rank = null) {
+  const numScore = Number(score) || 0;
+  if ((rank && Number(rank) <= 3) || numScore >= 90) {
+    return 'Winner';
+  }
+  if (numScore >= 75) {
+    return 'Merit';
+  }
+  return 'Participation';
+}
+
+// Safely sanitize strings for standard pdf-lib WinAnsi font encoding
+export function sanitizeForPdfFont(text) {
+  if (!text) return '';
+  return String(text)
+    .normalize('NFKD')
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/[\u201C\u201D]/g, '"')
+    .replace(/[\u2013\u2014]/g, '-')
+    .replace(/[^\x20-\x7E\xA0-\xFF]/g, '');
+}
 
 // Default Template Signatories & Assets
 export const DEFAULT_TEMPLATE_CONFIG = {
@@ -43,21 +100,26 @@ async function fetchImageBytes(urlOrDataUri) {
  */
 export async function generateCertificatePdf({
   studentName = 'Student Name',
+  eventName = 'Technova Code Sprint: 9 Days to Build',
   language = 'Python',
   score = '75.0',
-  certificateId = 'TNV-CS-2026-0001-K7Q2',
+  rank = null,
+  type = 'Participation',
+  certificateId = 'CERT-2026-TEST0001',
+  issueDate = '22 Oct 2026',
   templateConfig = {}
 }) {
   const config = { ...DEFAULT_TEMPLATE_CONFIG, ...templateConfig };
-  const verifyDomain = typeof window !== 'undefined' ? window.location.origin : 'https://technova-sprint.svit.ac.in';
+  const verifyDomain = getPublicBaseUrl();
   const verifyUrl = `${verifyDomain}/verify/${certificateId}`;
 
   // 1. Initialize Document
+  const safeName = sanitizeForPdfFont(studentName);
   const pdfDoc = await PDFDocument.create();
   pdfDoc.setTitle('Technova Code Sprint Certificate');
-  pdfDoc.setAuthor(studentName);
-  pdfDoc.setSubject('Certificate of Completion - Technova Code Sprint: 9 Days to Build');
-  pdfDoc.setKeywords(['Technova', 'Code Sprint', 'SVIT Nashik', 'Certificate', certificateId]);
+  pdfDoc.setAuthor(safeName);
+  pdfDoc.setSubject(`Certificate of ${type} - ${eventName}`);
+  pdfDoc.setKeywords(['Technova', 'Code Sprint', 'SVIT Nashik', 'Certificate', certificateId, type]);
 
   // A4 Landscape: 841.89 x 595.28 pt
   const width = 841.89;
@@ -227,15 +289,19 @@ export async function generateCertificatePdf({
     2.5
   );
 
-  // G. "OF COMPLETION"
-  // Helvetica 12.5 pt, letter-spacing 5.5, baseline at 232 pt
+  // G. "OF COMPLETION" / "OF MERIT" / "OF EXCELLENCE & MERIT"
+  const typeSubtitle = type === 'Winner' 
+    ? 'OF EXCELLENCE & MERIT' 
+    : type === 'Merit' 
+    ? 'OF MERIT' 
+    : 'OF COMPLETION';
   drawCenteredTextWithSpacing(
-    'OF COMPLETION',
+    typeSubtitle,
     232,
     helvetica,
     12.5,
     textColor,
-    5.5
+    typeSubtitle.length > 15 ? 3.0 : 5.5
   );
 
   // H. "This is proudly presented to"
@@ -250,14 +316,14 @@ export async function generateCertificatePdf({
     color: greyColor
   });
 
-  // I. Student Name: Times Italic 32 pt (shrink down to min 20 pt), #1A1A1A, centred, in box 500 pt wide
+  // I. Student Name: Times Italic 32 pt (shrink down to min 16 pt), #1A1A1A, centred, in box 500 pt wide
   // with a 1 pt line (#CFAFA8), 460 pt wide, under it at about 316 pt
   let nameFontSize = 32;
-  while (timesItalic.widthOfTextAtSize(studentName, nameFontSize) > 460 && nameFontSize > 20) {
+  while (timesItalic.widthOfTextAtSize(safeName, nameFontSize) > 460 && nameFontSize > 16) {
     nameFontSize -= 0.5;
   }
-  const nameWidth = timesItalic.widthOfTextAtSize(studentName, nameFontSize);
-  page.drawText(studentName, {
+  const nameWidth = timesItalic.widthOfTextAtSize(safeName, nameFontSize);
+  page.drawText(safeName, {
     x: (width - nameWidth) / 2,
     y: fromTop(308),
     size: nameFontSize,
@@ -278,7 +344,7 @@ export async function generateCertificatePdf({
   // Line 1: "for successfully completing the Technova Code Sprint: 9 Days to Build,"
   drawMixedCenteredLine([
     { text: 'for successfully completing the ', font: helvetica, size: 12.5, color: textColor },
-    { text: 'Technova Code Sprint: 9 Days to Build', font: helveticaBold, size: 12.5, color: textColor },
+    { text: eventName || 'Technova Code Sprint: 9 Days to Build', font: helveticaBold, size: 12.5, color: textColor },
     { text: ',', font: helvetica, size: 12.5, color: textColor }
   ], 342);
 
@@ -287,9 +353,9 @@ export async function generateCertificatePdf({
     { text: 'a daily coding challenge organised by the Technical Skill Development Hub, SVIT Nashik,', font: helvetica, size: 12.5, color: textColor }
   ], 360);
 
-  // Line 3: "from 13 Oct 2026 to 21 Oct 2026 , in the [Language] track, with a score of [Score] / 100."
+  // Line 3: "from 13 Oct 2026 to 21 Oct 2026 , in the [Language] track, with a score of [Score] / 100" (+ Rank if available)
   const formattedScore = typeof score === 'number' ? score.toFixed(1) : String(score);
-  drawMixedCenteredLine([
+  const line3Segments = [
     { text: 'from  ', font: helvetica, size: 12.5, color: textColor },
     { text: '13 Oct 2026', font: helveticaBold, size: 12, color: redColor },
     { text: '  to  ', font: helvetica, size: 12.5, color: textColor },
@@ -298,8 +364,16 @@ export async function generateCertificatePdf({
     { text: `[${language}]`, font: helveticaBold, size: 12, color: redColor },
     { text: ' track, with a score of ', font: helvetica, size: 12.5, color: textColor },
     { text: `[${formattedScore}]`, font: helveticaBold, size: 12, color: redColor },
-    { text: ' / 100.', font: helvetica, size: 12.5, color: textColor }
-  ], 378);
+    { text: ' / 100', font: helvetica, size: 12.5, color: textColor }
+  ];
+  if (rank) {
+    line3Segments.push({ text: ' (', font: helvetica, size: 12.5, color: textColor });
+    line3Segments.push({ text: `Rank #${rank}`, font: helveticaBold, size: 12, color: redColor });
+    line3Segments.push({ text: ').', font: helvetica, size: 12.5, color: textColor });
+  } else {
+    line3Segments.push({ text: '.', font: helvetica, size: 12.5, color: textColor });
+  }
+  drawMixedCenteredLine(line3Segments, 378);
 
   // K. "Learn | Build | Grow": Times Italic 12.5 pt, red, letter-spacing 2, baseline at 412 pt
   drawCenteredTextWithSpacing(
@@ -409,13 +483,13 @@ export async function generateCertificatePdf({
     });
   }
 
-  // Certificate ID under seal: "Certificate ID: [ID]" in Helvetica 9 pt, grey, centred
-  const certIdText = `Certificate ID:   ${certificateId}`;
-  const certIdW = helvetica.widthOfTextAtSize(certIdText, 9);
+  // Certificate ID and issue date under seal
+  const certIdText = `Certificate ID:   ${certificateId}   •   Issue Date:   ${issueDate}`;
+  const certIdW = helvetica.widthOfTextAtSize(certIdText, 8.5);
   page.drawText(certIdText, {
     x: (width - certIdW) / 2,
     y: fromTop(530),
-    size: 9,
+    size: 8.5,
     font: helvetica,
     color: greyColor
   });
@@ -459,7 +533,7 @@ export async function generateCertificatePdf({
 }
 
 /**
- * Trigger download of generated PDF certificate in browser
+ * Trigger download of generated PDF certificate in browser: <StudentName>_<CertID>.pdf
  */
 export async function downloadCertificatePdf(params) {
   const bytes = await generateCertificatePdf(params);
@@ -467,12 +541,57 @@ export async function downloadCertificatePdf(params) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   
-  // Format filename: Technova_Code_Sprint_Certificate_[Student-Name].pdf
   const sanitizedName = (params.studentName || 'Student').replace(/[^a-zA-Z0-9_\-]/g, '_');
+  const certId = (params.certificateId || 'CERT').replace(/[^a-zA-Z0-9_\-]/g, '_');
   link.href = url;
-  link.download = `Technova_Code_Sprint_Certificate_${sanitizedName}.pdf`;
+  link.download = `${sanitizedName}_${certId}.pdf`;
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
   setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
+
+/**
+ * Generate a ZIP containing certificates for all eligible students: <StudentName>_<CertID>.pdf
+ */
+export async function generateCertificatesZip(certificatesList = [], templateConfig = {}) {
+  const zip = new JSZip();
+  for (const cert of certificatesList) {
+    try {
+      const pdfBytes = await generateCertificatePdf({
+        studentName: cert.studentName,
+        eventName: cert.event || 'Technova Code Sprint: 9 Days to Build',
+        language: cert.language || cert.track || 'Python',
+        score: cert.score ?? 100,
+        rank: cert.rank || null,
+        type: cert.type || 'Participation',
+        certificateId: cert.certificateId,
+        issueDate: cert.issueDate || cert.issuedDate || '22 Oct 2026',
+        templateConfig
+      });
+      const sanitizedName = (cert.studentName || 'Student').replace(/[^a-zA-Z0-9_\-]/g, '_');
+      const certId = (cert.certificateId || 'CERT').replace(/[^a-zA-Z0-9_\-]/g, '_');
+      const filename = `${sanitizedName}_${certId}.pdf`;
+      zip.file(filename, pdfBytes);
+    } catch (e) {
+      console.warn(`Failed to package certificate for ${cert.studentName}:`, e);
+    }
+  }
+  return await zip.generateAsync({ type: 'blob' });
+}
+
+/**
+ * Trigger browser download of bulk certificates ZIP archive
+ */
+export async function downloadCertificatesZip(certificatesList = [], templateConfig = {}) {
+  const blob = await generateCertificatesZip(certificatesList, templateConfig);
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `Technova_Certificates_${new Date().toISOString().slice(0, 10)}.zip`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+

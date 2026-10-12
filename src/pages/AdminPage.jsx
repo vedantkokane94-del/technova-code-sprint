@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import bcrypt from 'bcryptjs';
 import { useApp } from '../context/AppContext';
 import { calculateTextSimilarity, detectAiGeneratedContent } from '../utils/hash';
 import { 
@@ -43,13 +42,31 @@ import {
   Settings,
   Upload,
   Play,
-  Unlock
+  Unlock,
+  Smartphone,
+  Laptop,
+  Server,
+  Sliders,
+  LogOut
 } from 'lucide-react';
 import { Github } from '../components/GithubIcon';
 import { CertificateView } from '../components/CertificateView';
 import { SVITHubLogo, DurgaMataSketch } from '../components/BrandLogo';
 import { SPRINT_SCHEDULE, SPRINT_START_DATE, SPRINT_END_DATE, SPRINT_ISSUE_DATE, getSprintDaySchedule } from '../data/tasksSeed';
 import { downloadCertificatePdf, DEFAULT_TEMPLATE_CONFIG } from '../utils/certificateGenerator';
+import { 
+  checkAdminDeviceStatus, 
+  registerAdminDevice, 
+  loginAdminWithPassword, 
+  fetchAdminLogs, 
+  resetAdminDevice, 
+  fetchExamSettings, 
+  saveExamSettings,
+  fetchBlockedAttemptsApi,
+  whitelistStudentApi,
+  fetchWhitelistsApi,
+  removeWhitelistApi
+} from '../services/api';
 
 export const AdminPage = ({ setCurrentTab }) => {
   const { 
@@ -88,6 +105,7 @@ export const AdminPage = ({ setCurrentTab }) => {
     setUser,
     isAdmin,
     loginAsAdmin,
+    logoutAdmin,
     templateConfig,
     updateTemplateConfig,
     approveCertificateTemplate,
@@ -99,12 +117,45 @@ export const AdminPage = ({ setCurrentTab }) => {
     getEffectiveServerTime,
     clearTestStudentData,
     clearDayOverride,
-    dayOverride
+    dayOverride,
+    examSettings,
+    updateExamSettings,
+    resultsPublished,
+    toggleResultsPublished,
+    allowExitedStudentsForCert,
+    toggleAllowExitedForCert
   } = useApp();
 
-  const [activeTab, setActiveTab] = useState('submissions'); // 'submissions' | 'proctoring' | 'certificates' | 'verification' | 'tasks' | 'template' | 'testmode'
+  const [activeTab, setActiveTab] = useState('submissions'); // 'submissions' | 'proctoring' | 'certificates' | 'verification' | 'tasks' | 'template' | 'testmode' | 'security' | 'examsettings'
   const [filterDay, setFilterDay] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
+  
+  // Local Exam Settings State (Section 2 & 3)
+  const [localExamSettings, setLocalExamSettings] = useState({
+    negativeMarking: examSettings?.negativeMarking ?? 0,
+    quizTimeLimitSeconds: examSettings?.quizTimeLimitSeconds ?? 600,
+    passMark: examSettings?.passMark ?? 50,
+    judgingCriteriaText: examSettings?.judgingCriteriaText ?? '',
+    violationMode: examSettings?.violationMode ?? 'immediate_exit',
+    warningsAllowed: examSettings?.warningsAllowed ?? 0,
+    noFaceSeconds: examSettings?.noFaceSeconds ?? 10,
+    phoneConfidence: examSettings?.phoneConfidence ?? 0.55
+  });
+
+  React.useEffect(() => {
+    if (examSettings) {
+      setLocalExamSettings({
+        negativeMarking: examSettings.negativeMarking ?? 0,
+        quizTimeLimitSeconds: examSettings.quizTimeLimitSeconds ?? 600,
+        passMark: examSettings.passMark ?? 50,
+        judgingCriteriaText: examSettings.judgingCriteriaText ?? '',
+        violationMode: examSettings.violationMode ?? 'immediate_exit',
+        warningsAllowed: examSettings.warningsAllowed ?? 0,
+        noFaceSeconds: examSettings.noFaceSeconds ?? 10,
+        phoneConfidence: examSettings.phoneConfidence ?? 0.55
+      });
+    }
+  }, [examSettings]);
   
   // Viva modal / evaluation state
   const [selectedSubForViva, setSelectedSubForViva] = useState(null);
@@ -169,23 +220,74 @@ export const AdminPage = ({ setCurrentTab }) => {
     reader.readAsDataURL(file);
   };
 
-  // Standard Bcrypt Hash loaded from environment variable (Never hardcode plaintext password)
-  const ADMIN_PASSWORD_HASH = import.meta.env.VITE_ADMIN_PASSWORD_HASH || "$2b$10$ZYadSLPwAhGbhqclMY/1E.c5ADCDg06GrCOV6Sl9EtE3JnzfSdiP6";
-
-  // Modal state for student submission track inspection window
-  const [selectedStudentForTrackWindow, setSelectedStudentForTrackWindow] = useState(null);
-
-  // Admin Login state (starts completely blank)
-  const [adminLoginForm, setAdminLoginForm] = useState({
-    name: '',
-    email: '',
-    department: '',
-    password: ''
+  // Device Binding & Server-Side Admin Authentication (Section 1)
+  const [deviceStatus, setDeviceStatus] = useState({
+    isRegistered: false,
+    isThisDeviceTrusted: false,
+    deviceName: null,
+    allowedIpsConfigured: false,
+    clientIp: ''
   });
+  const [isCheckingDevice, setIsCheckingDevice] = useState(true);
+  const [deviceRegistrationName, setDeviceRegistrationName] = useState('');
+  const [setupKeyInput, setSetupKeyInput] = useState('');
+  const [adminPasswordInput, setAdminPasswordInput] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loginError, setLoginError] = useState('');
   const [failedAttempts, setFailedAttempts] = useState(0);
   const [lockoutSeconds, setLockoutSeconds] = useState(0);
+  const [isSubmittingAuth, setIsSubmittingAuth] = useState(false);
+  const [auditLogs, setAuditLogs] = useState([]);
+  const [loadingAuditLogs, setLoadingAuditLogs] = useState(false);
+  const [auditLogSearch, setAuditLogSearch] = useState('');
+  const [resetDevicePassword, setResetDevicePassword] = useState('');
+  const [showResetDeviceModal, setShowResetDeviceModal] = useState(false);
+
+  const [blockedAttempts, setBlockedAttempts] = useState([]);
+  const [loadingBlockedAttempts, setLoadingBlockedAttempts] = useState(false);
+  const [whitelistedStudents, setWhitelistedStudents] = useState([]);
+  const [whitelistPrnInput, setWhitelistPrnInput] = useState('');
+  const [whitelistNameInput, setWhitelistNameInput] = useState('');
+  const [whitelistNotesInput, setWhitelistNotesInput] = useState('');
+
+  // Check device status on mount and load audit logs
+  const refreshDeviceStatus = async () => {
+    setIsCheckingDevice(true);
+    const status = await checkAdminDeviceStatus();
+    setDeviceStatus(status);
+    setIsCheckingDevice(false);
+  };
+
+  const loadAuditLogs = async () => {
+    setLoadingAuditLogs(true);
+    const data = await fetchAdminLogs();
+    if (data && data.logs) {
+      setAuditLogs(data.logs);
+    }
+    setLoadingAuditLogs(false);
+  };
+
+  const loadBlockedAttemptsAndWhitelists = async () => {
+    setLoadingBlockedAttempts(true);
+    const [blocks, whites] = await Promise.all([
+      fetchBlockedAttemptsApi(),
+      fetchWhitelistsApi()
+    ]);
+    setBlockedAttempts(blocks || []);
+    setWhitelistedStudents(whites || []);
+    setLoadingBlockedAttempts(false);
+  };
+
+  React.useEffect(() => {
+    refreshDeviceStatus();
+  }, []);
+
+  React.useEffect(() => {
+    if (isAdmin) {
+      loadAuditLogs();
+      loadBlockedAttemptsAndWhitelists();
+    }
+  }, [isAdmin]);
 
   // Lockout countdown timer
   React.useEffect(() => {
@@ -195,53 +297,70 @@ export const AdminPage = ({ setCurrentTab }) => {
     }
   }, [lockoutSeconds]);
 
-  // Helper to calculate password strength
-  const getPasswordStrength = (pwd) => {
-    if (!pwd) return { score: 0, label: 'Empty', color: 'bg-gray-200' };
-    let score = 0;
-    if (pwd.length >= 8) score++;
-    if (/[A-Z]/.test(pwd)) score++;
-    if (/[0-9]/.test(pwd)) score++;
-    if (/[^A-Za-z0-9]/.test(pwd)) score++;
-
-    if (score <= 1) return { score: 1, label: 'Weak (8+ chars, upper, number & symbol required)', color: 'bg-red-500' };
-    if (score === 2 || score === 3) return { score, label: 'Moderate', color: 'bg-amber-500' };
-    return { score: 4, label: 'Strong & Secure', color: 'bg-emerald-500' };
-  };
-
-  const handleAdminLoginSubmit = (e) => {
+  // Handle Device Registration (One-Time Setup Mode)
+  const handleRegisterDevice = async (e) => {
     e.preventDefault();
     if (lockoutSeconds > 0) {
       setLoginError(`Security lockout in effect. Please wait ${lockoutSeconds} seconds before retrying.`);
       return;
     }
-
-    if (!adminLoginForm.name.trim() || !adminLoginForm.email.trim()) {
-      setLoginError("Please enter your faculty full name and official SVIT email address.");
+    if (!setupKeyInput.trim()) {
+      setLoginError("Master ADMIN_SETUP_KEY is required to register a trusted workstation.");
+      return;
+    }
+    if (!adminPasswordInput.trim()) {
+      setLoginError("Master administrator password is required.");
       return;
     }
 
-    const inputPass = adminLoginForm.password.trim();
-    let isPasswordValid = false;
-    try {
-      isPasswordValid = bcrypt.compareSync(inputPass, ADMIN_PASSWORD_HASH);
-    } catch (err) {
-      console.error("Bcrypt verification error:", err);
+    setIsSubmittingAuth(true);
+    setLoginError('');
+
+    const res = await registerAdminDevice(
+      adminPasswordInput.trim(), 
+      deviceRegistrationName.trim() || "Primary Administrator Workstation",
+      setupKeyInput.trim()
+    );
+    setIsSubmittingAuth(false);
+
+    if (!res.success) {
+      setLoginError(res.error || "Failed to register and bind device.");
+      return;
     }
 
-    const isSvitFaculty = adminLoginForm.email.toLowerCase().endsWith('@svit.ac.in');
+    setAdminToast("Workstation successfully bound as trusted admin device!");
+    await refreshDeviceStatus();
+    loginAsAdmin({
+      name: "Vedant Kokane",
+      email: "technicalteamsvit@gmail.com",
+      department: "Technical Skill Development Hub",
+      rollNo: "SVIT-ADMIN-LEAD"
+    });
+  };
 
-    if (!isPasswordValid || !isSvitFaculty) {
-      const nextFailed = failedAttempts + 1;
-      setFailedAttempts(nextFailed);
-      if (nextFailed >= 5) {
-        setLockoutSeconds(30);
-        setLoginError("Security lockout: 5 failed attempts. Login locked for 30 seconds.");
-      } else {
-        const errorMsg = !isSvitFaculty 
-          ? "Official college email required (must end with @svit.ac.in)." 
-          : `Authentication failed. Incorrect admin password. Attempts left: ${5 - nextFailed}`;
-        setLoginError(errorMsg);
+  // Handle Admin Password Login (Requires password AND valid device token)
+  const handlePasswordLoginSubmit = async (e) => {
+    e.preventDefault();
+    if (lockoutSeconds > 0) {
+      setLoginError(`Security lockout in effect. Please wait ${lockoutSeconds} seconds before retrying.`);
+      return;
+    }
+    if (!adminPasswordInput.trim()) {
+      setLoginError("Please enter your administrator password.");
+      return;
+    }
+
+    setIsSubmittingAuth(true);
+    setLoginError('');
+
+    const res = await loginAdminWithPassword(adminPasswordInput.trim());
+    setIsSubmittingAuth(false);
+
+    if (!res.success) {
+      const errorMsg = res.error || "Authentication failed. Invalid credentials or unauthorized device.";
+      setLoginError(errorMsg);
+      if (res.attemptsRemaining !== undefined && res.attemptsRemaining <= 0) {
+        setLockoutSeconds(60);
       }
       return;
     }
@@ -250,11 +369,29 @@ export const AdminPage = ({ setCurrentTab }) => {
     setLockoutSeconds(0);
     setLoginError('');
     loginAsAdmin({
-      name: adminLoginForm.name,
-      email: adminLoginForm.email,
-      department: adminLoginForm.department || "Technical Skill Development Hub",
-      rollNo: "SVIT-FACULTY"
+      name: res.user?.name || "Vedant Kokane",
+      email: res.user?.email || "technicalteamsvit@gmail.com",
+      department: "Technical Skill Development Hub",
+      rollNo: "SVIT-ADMIN-LEAD"
     });
+  };
+
+  // Handle Device Unbinding / Reset
+  const handleResetDevice = async () => {
+    if (!resetDevicePassword) {
+      alert("Password required to unbind device.");
+      return;
+    }
+    const res = await resetAdminDevice(resetDevicePassword);
+    if (!res.success) {
+      alert(res.error || "Failed to unbind device.");
+      return;
+    }
+    alert("Admin device has been unbound successfully.");
+    setShowResetDeviceModal(false);
+    setResetDevicePassword('');
+    await refreshDeviceStatus();
+    window.location.reload();
   };
 
   // Compute similarity flags across submissions
@@ -401,6 +538,40 @@ export const AdminPage = ({ setCurrentTab }) => {
     const link = document.createElement('a');
     link.setAttribute('href', encodedUri);
     link.setAttribute('download', `svit_technova_student_results_pass_fail_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // Full System Data Export as JSON
+  const handleExportJSON = () => {
+    const exportData = {
+      exportedAt: new Date().toISOString(),
+      system: "Technova SVIT Code Sprint 2026",
+      resultsPublished,
+      examSettings,
+      students: allStudents,
+      submissions: submissionsWithFlags,
+      certificates: certificates || [],
+      studentResults: studentsWithCertInfo.map(s => ({
+        name: s.name,
+        prn: s.prn,
+        email: s.email,
+        track: s.language || s.track,
+        dayScores: s.eligibility?.summary?.dayScores || {},
+        totalScore: s.eligibility?.summary?.totalScore ?? 0,
+        isEligible: s.eligibility?.isEligible,
+        isExited: s.eligibility?.isExited,
+        exitReason: s.eligibility?.exitReason,
+        certStatus: s.cert?.status,
+        certId: s.cert?.certificateId
+      }))
+    };
+
+    const jsonString = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(exportData, null, 2));
+    const link = document.createElement('a');
+    link.setAttribute('href', jsonString);
+    link.setAttribute('download', `svit_technova_complete_export_${new Date().toISOString().slice(0, 10)}.json`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -842,8 +1013,49 @@ export const AdminPage = ({ setCurrentTab }) => {
     );
   };
 
-  // Gatekeeper (Section 8): Google sign-in required, verified email, name equals "Vedant Kokane"
+  // Gatekeeper (Section 1): Admin Device Lock & Hardware Concealment
   if (!isAdmin) {
+    if (isCheckingDevice) {
+      return (
+        <div className="min-h-screen bg-[#FCF9F2] dark:bg-[#0F1115] transition-colors py-20 px-4 flex flex-col items-center justify-center">
+          <div className="max-w-md w-full bg-white dark:bg-[#181B20] rounded-3xl border border-[#E8DEC8] dark:border-[#2E3440] p-8 shadow-sm text-center space-y-3">
+            <RefreshCw className="w-8 h-8 animate-spin mx-auto text-[#B3122B]" />
+            <p className="text-xs text-gray-500 font-medium">Verifying cryptographic device signature...</p>
+          </div>
+        </div>
+      );
+    }
+
+    // CONCEALMENT: Any request from an unregistered / untrusted device gets a generic 404 response
+    // Do not show login box, do not show admin title, do not reveal the portal exists
+    if (deviceStatus.notFound || (!deviceStatus.setupOpen && !deviceStatus.isThisDeviceTrusted)) {
+      return (
+        <div className="min-h-screen bg-[#FCF9F2] dark:bg-[#0F1115] transition-colors py-20 px-4 flex flex-col items-center justify-center select-none">
+          <div className="max-w-md w-full bg-white dark:bg-[#181B20] rounded-3xl border border-[#E8DEC8] dark:border-[#2E3440] p-8 shadow-sm text-center">
+            <div className="w-16 h-16 rounded-3xl bg-gray-100 dark:bg-gray-800 flex items-center justify-center mx-auto mb-4">
+              <AlertOctagon className="w-8 h-8 text-gray-400" />
+            </div>
+            <h1 className="text-4xl font-black text-[#1A1A1A] dark:text-white mb-2 font-mono">404</h1>
+            <h2 className="text-lg font-bold text-gray-800 dark:text-gray-200 mb-2">Page Not Found</h2>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mb-6 leading-relaxed">
+              The requested URL was not found on this server. The link may be broken or the resource has been removed.
+            </p>
+            {setCurrentTab && (
+              <button
+                onClick={() => {
+                  setCurrentTab('landing');
+                  window.history.pushState(null, '', '/');
+                }}
+                className="w-full py-3 px-4 rounded-xl font-bold text-xs text-white bg-[#B3122B] hover:bg-[#8B0D20] transition-colors cursor-pointer"
+              >
+                Return to Student Portal
+              </button>
+            )}
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="min-h-screen bg-[#FCF9F2] dark:bg-[#0F1115] transition-colors py-12 px-4 sm:px-6 lg:px-8 flex items-center justify-center">
         <div className="max-w-md w-full">
@@ -864,52 +1076,166 @@ export const AdminPage = ({ setCurrentTab }) => {
                 Faculty Admin Portal
               </h2>
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 leading-relaxed">
-                Administrative access is restricted strictly to <strong>Vedant Kokane</strong> with verified Google authentication.
+                Cryptographically bound administrator console with 2-factor hardware token verification.
               </p>
             </div>
 
-            {/* Error banner if non-Vedant signed in */}
-            {user && user.name?.toLowerCase() !== 'vedant kokane' && (
-              <div className="p-3.5 rounded-2xl bg-red-500/10 border border-red-500/25 text-xs font-semibold text-red-600 dark:text-red-400 mb-4 flex items-start gap-2">
-                <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-                <div>
-                  <span className="font-bold">Access Denied:</span> You are currently signed in as <strong>{user.name}</strong>. Only <strong>Vedant Kokane</strong> with a verified Google account can access this admin console.
+            {deviceStatus.setupOpen ? (
+              /* Case 1: Initial Setup Mode - Requires ADMIN_SETUP_KEY + Password */
+              <form onSubmit={handleRegisterDevice} className="space-y-4">
+                <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-900 dark:text-amber-200 text-xs">
+                  <div className="font-bold flex items-center gap-1.5 mb-1 text-sm text-[#B3122B] dark:text-[#ff8a9e]">
+                    <Laptop className="w-4 h-4" />
+                    <span>One-Time Hardware Binding Setup</span>
+                  </div>
+                  <p className="leading-relaxed">
+                    No hardware device is registered yet. Enter the master <strong>ADMIN_SETUP_KEY</strong> and administrator password to generate and bind your cryptographic token.
+                  </p>
                 </div>
-              </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">
+                    Master Setup Key (ADMIN_SETUP_KEY)
+                  </label>
+                  <input
+                    type="password"
+                    placeholder="Enter long random ADMIN_SETUP_KEY"
+                    value={setupKeyInput}
+                    onChange={(e) => setSetupKeyInput(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-[#E8DEC8] dark:border-[#2E3440] bg-white dark:bg-[#14171C] text-xs text-[#1A1A1A] dark:text-white focus:outline-hidden focus:border-[#B3122B] font-mono"
+                    required
+                  />
+                  <span className="text-[10px] text-gray-400 mt-0.5 block">Configured in server .env environment variable.</span>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">
+                    Device Label / Workstation Name
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Vedant's Primary Workstation (SVIT)"
+                    value={deviceRegistrationName}
+                    onChange={(e) => setDeviceRegistrationName(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-[#E8DEC8] dark:border-[#2E3440] bg-white dark:bg-[#14171C] text-xs text-[#1A1A1A] dark:text-white focus:outline-hidden focus:border-[#B3122B]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">
+                    Master Administrator Password
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      placeholder="Enter administrator password"
+                      value={adminPasswordInput}
+                      onChange={(e) => setAdminPasswordInput(e.target.value)}
+                      className="w-full px-3.5 py-2.5 pr-10 rounded-xl border border-[#E8DEC8] dark:border-[#2E3440] bg-white dark:bg-[#14171C] text-xs text-[#1A1A1A] dark:text-white focus:outline-hidden focus:border-[#B3122B]"
+                      required
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600"
+                    >
+                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                {loginError && (
+                  <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-600 text-xs font-semibold">
+                    {loginError}
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={isSubmittingAuth}
+                  className="w-full py-3 rounded-xl font-bold text-xs text-white bg-[#B3122B] hover:bg-[#8B0D20] shadow-md shadow-[#B3122B]/20 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                >
+                  <ShieldCheck className="w-4 h-4" />
+                  <span>{isSubmittingAuth ? 'Binding Hardware Token...' : 'Register & Bind Trusted Workstation'}</span>
+                </button>
+              </form>
+            ) : (
+              /* Case 2: Bound Trusted Workstation - Password-Only Login */
+              <form onSubmit={handlePasswordLoginSubmit} className="space-y-4">
+                
+                {/* Trusted Device Status Badge */}
+                <div className="p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-800 dark:text-emerald-300 text-xs flex items-center gap-2.5">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <div>
+                    <div className="font-bold">Trusted Hardware Device Verified</div>
+                    <div className="text-[11px] text-gray-500 dark:text-gray-400 font-mono">
+                      {deviceStatus.deviceName || "Bound Admin Workstation"}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Password-Only Login Input */}
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">
+                    Administrator Password
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      placeholder="Enter administrator password"
+                      value={adminPasswordInput}
+                      onChange={(e) => setAdminPasswordInput(e.target.value)}
+                      disabled={lockoutSeconds > 0 || isSubmittingAuth}
+                      className="w-full px-3.5 py-2.5 pr-10 rounded-xl border border-[#E8DEC8] dark:border-[#2E3440] bg-white dark:bg-[#14171C] text-xs text-[#1A1A1A] dark:text-white focus:outline-hidden focus:border-[#B3122B] disabled:opacity-50"
+                      required
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600"
+                    >
+                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Lockout Notice */}
+                {lockoutSeconds > 0 && (
+                  <div className="p-3 rounded-xl bg-red-600 text-white text-xs font-bold flex items-center gap-2">
+                    <Clock className="w-4 h-4 animate-spin" />
+                    <span>Temporary Security Lockout: Retry in {lockoutSeconds}s</span>
+                  </div>
+                )}
+
+                {/* Generic Error Notice on Failure */}
+                {loginError && (
+                  <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-600 text-xs font-semibold">
+                    {loginError}
+                  </div>
+                )}
+
+                {/* Password-Only Submit Button */}
+                <button
+                  type="submit"
+                  disabled={lockoutSeconds > 0 || isSubmittingAuth}
+                  className="w-full py-3.5 px-4 rounded-xl font-bold text-xs text-white bg-[#B3122B] hover:bg-[#8B0D20] shadow-md shadow-[#B3122B]/20 transition-all flex items-center justify-center gap-2.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Lock className="w-4 h-4" />
+                  <span>{isSubmittingAuth ? 'Verifying Credentials...' : 'Sign In with Password'}</span>
+                </button>
+              </form>
             )}
 
-            {/* Single-Click Google Authentication Button for Vedant Kokane (Section 8) */}
-            <div className="space-y-4">
+            {/* Return Link */}
+            {setCurrentTab && (
               <button
                 type="button"
-                onClick={() => {
-                  loginAsAdmin({
-                    name: "Vedant Kokane",
-                    email: "vedantkokane94@gmail.com",
-                    department: "Technical Skill Development Hub",
-                    rollNo: "SVIT-ADMIN-LEAD"
-                  });
-                }}
-                className="w-full py-3.5 px-4 rounded-xl font-bold text-xs text-white bg-[#B3122B] hover:bg-[#8B0D20] shadow-md shadow-[#B3122B]/20 transition-all flex items-center justify-center gap-2.5 cursor-pointer"
+                onClick={() => setCurrentTab('landing')}
+                className="mt-4 w-full py-2 rounded-xl font-medium text-xs text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 transition-colors cursor-pointer text-center block"
               >
-                <Shield className="w-4 h-4" />
-                <span>Sign in with Google (Vedant Kokane)</span>
+                ← Return to Student Portal
               </button>
-
-              <div className="p-3.5 rounded-xl bg-[#FCF9F2] dark:bg-[#111317] border border-[#E8DEC8] dark:border-[#2E3440] text-[11px] text-gray-600 dark:text-gray-400 text-center">
-                <span className="font-bold text-[#1A1A1A] dark:text-white">Identity Verification:</span> Google OAuth • Email Verified: <span className="font-mono text-emerald-600">vedantkokane94@gmail.com</span>
-              </div>
-
-              {setCurrentTab && (
-                <button
-                  type="button"
-                  onClick={() => setCurrentTab('landing')}
-                  className="w-full py-2 rounded-xl font-medium text-xs text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 transition-colors cursor-pointer text-center block"
-                >
-                  ← Return to Student Portal
-                </button>
-              )}
-            </div>
+            )}
 
           </div>
         </div>
@@ -921,6 +1247,44 @@ export const AdminPage = ({ setCurrentTab }) => {
     <div className="min-h-screen bg-[#FCF9F2] dark:bg-[#0F1115] transition-colors py-10 px-4 sm:px-6 lg:px-8 pb-24">
       <div className="max-w-7xl mx-auto">
         
+        {/* Administrator Session Status Banner */}
+        <div className="mb-6 p-3 sm:p-4 rounded-2xl bg-white dark:bg-[#181B20] border border-[#E8DEC8] dark:border-[#2E3440] shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-[#B3122B]/10 text-[#B3122B] flex items-center justify-center font-bold shrink-0">
+              <ShieldCheck className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-extrabold text-xs text-[#1A1A1A] dark:text-white">
+                  {user?.name || "Vedant Kokane"}
+                </span>
+                <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold">
+                  Authorized Administrator
+                </span>
+                <span className="text-[11px] text-gray-400 font-mono">
+                  ({user?.email || "technicalteamsvit@gmail.com"})
+                </span>
+              </div>
+              <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
+                Role: Faculty Lead • Session Status: Active (HttpOnly 2h JWT) • Technical Skill Development Hub
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={async () => {
+              await logoutAdmin();
+              if (setCurrentTab) setCurrentTab('landing');
+              window.history.pushState(null, '', '/');
+            }}
+            className="self-end sm:self-center px-3.5 py-1.5 rounded-xl text-xs font-bold bg-[#B3122B] text-white hover:bg-[#8B0D20] transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
+            title="Invalidate session and sign out"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+            <span>Sign Out Admin</span>
+          </button>
+        </div>
+
         {/* Admin Header */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
           <div>
@@ -951,6 +1315,14 @@ export const AdminPage = ({ setCurrentTab }) => {
             >
               <Download className="w-4 h-4" />
               <span>Export Raw Submissions</span>
+            </button>
+            <button
+              onClick={handleExportJSON}
+              className="px-4 py-2 rounded-xl text-xs font-bold bg-indigo-600 text-white hover:bg-indigo-700 shadow-sm flex items-center gap-2 transition-all cursor-pointer"
+              title="Export complete system state as structured JSON"
+            >
+              <Download className="w-4 h-4" />
+              <span>Export All (JSON)</span>
             </button>
             <button
               onClick={() => {
@@ -1177,6 +1549,28 @@ export const AdminPage = ({ setCurrentTab }) => {
             }`}
           >
             Manage 9-Day Tasks ({tasks.length})
+          </button>
+          <button
+            onClick={() => { setActiveTab('security'); loadAuditLogs(); }}
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1.5 cursor-pointer ${
+              activeTab === 'security'
+                ? 'bg-[#B3122B] text-white shadow-xs'
+                : 'text-gray-600 dark:text-gray-300 hover:bg-[#F5EFEB] dark:hover:bg-[#1E232B]'
+            }`}
+          >
+            <Shield className="w-3.5 h-3.5" />
+            <span>Device Security & Audit ({auditLogs.length})</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('examsettings')}
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1.5 cursor-pointer ${
+              activeTab === 'examsettings'
+                ? 'bg-[#B3122B] text-white shadow-xs'
+                : 'text-gray-600 dark:text-gray-300 hover:bg-[#F5EFEB] dark:hover:bg-[#1E232B]'
+            }`}
+          >
+            <Sliders className="w-3.5 h-3.5" />
+            <span>Judging & Proctoring Criteria</span>
           </button>
         </div>
 
@@ -1605,6 +1999,71 @@ export const AdminPage = ({ setCurrentTab }) => {
         {/* CERTIFICATES & EMAIL DELIVERY TAB */}
         {activeTab === 'certificates' && (
           <div className="space-y-6">
+
+            {/* Master Publication & Proctoring Eligibility Banner */}
+            <div className="p-5 rounded-3xl bg-white dark:bg-[#181B20] border border-[#E8DEC8] dark:border-[#2E3440] shadow-xs flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <Award className="w-5 h-5 text-[#B3122B]" />
+                  <h3 className="font-extrabold text-sm text-[#1A1A1A] dark:text-white">
+                    Certificate Release & Eligibility Policy
+                  </h3>
+                </div>
+                <p className="text-xs text-gray-500">
+                  Manage when students can download their certificates from their dashboard and whether exited students remain eligible.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-3 flex-wrap">
+                {/* Results Published Toggle */}
+                <div className="flex items-center gap-2 bg-[#FCF9F2] dark:bg-[#111317] p-1.5 px-3 rounded-2xl border border-[#E8DEC8] dark:border-[#2E3440]">
+                  <div className="text-xs">
+                    <span className="text-gray-500 text-[11px] block">Student Portal Download:</span>
+                    <strong className={resultsPublished ? 'text-emerald-600 font-bold' : 'text-amber-600 font-bold'}>
+                      {resultsPublished ? '● Results Published' : '○ Unpublished (Locked)'}
+                    </strong>
+                  </div>
+                  <button
+                    onClick={async () => {
+                      const updated = await toggleResultsPublished();
+                      setAdminToast(updated ? "Results published! Students can now download certificates." : "Results unpublished. Certificate downloads locked.");
+                      setTimeout(() => setAdminToast(''), 3500);
+                    }}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                      resultsPublished 
+                        ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs' 
+                        : 'bg-[#B3122B] hover:bg-[#8B0D20] text-white shadow-xs'
+                    }`}
+                  >
+                    {resultsPublished ? 'Lock Results' : 'Publish Results'}
+                  </button>
+                </div>
+
+                {/* Exited Students Eligibility Toggle */}
+                <div className="flex items-center gap-2 bg-[#FCF9F2] dark:bg-[#111317] p-1.5 px-3 rounded-2xl border border-[#E8DEC8] dark:border-[#2E3440]">
+                  <div className="text-xs">
+                    <span className="text-gray-500 text-[11px] block">Exited Students Policy:</span>
+                    <strong className={allowExitedStudentsForCert ? 'text-amber-600 font-bold' : 'text-gray-700 dark:text-gray-300 font-bold'}>
+                      {allowExitedStudentsForCert ? 'Allowed' : 'Disqualified (Default)'}
+                    </strong>
+                  </div>
+                  <button
+                    onClick={async () => {
+                      const updated = await toggleAllowExitedForCert();
+                      setAdminToast(updated ? "Exited/disqualified students are now permitted for certificates." : "Exited/disqualified students disqualified from certificates.");
+                      setTimeout(() => setAdminToast(''), 3500);
+                    }}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                      allowExitedStudentsForCert
+                        ? 'bg-amber-600 hover:bg-amber-700 text-white shadow-xs'
+                        : 'bg-gray-200 dark:bg-[#252A34] text-gray-700 dark:text-gray-300 hover:bg-gray-300'
+                    }`}
+                  >
+                    {allowExitedStudentsForCert ? 'Revoke Access' : 'Allow Exited'}
+                  </button>
+                </div>
+              </div>
+            </div>
             
             {/* Warning if certificate template is not approved */}
             {!templateConfig?.isApproved && (
@@ -1820,6 +2279,15 @@ export const AdminPage = ({ setCurrentTab }) => {
                 >
                   <Download className="w-3.5 h-3.5 text-emerald-600" />
                   <span>Export Email Log</span>
+                </button>
+
+                <button
+                  onClick={handleExportJSON}
+                  className="px-3.5 py-2 rounded-xl text-xs font-bold bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 hover:text-[#B3122B] border border-indigo-200 dark:border-indigo-800 transition-all flex items-center gap-1.5 cursor-pointer"
+                  title="Export complete system state and student results as JSON"
+                >
+                  <Download className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>Export JSON</span>
                 </button>
 
                 <button
@@ -3168,6 +3636,700 @@ export const AdminPage = ({ setCurrentTab }) => {
                 >
                   Apply Custom Time
                 </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* DEVICE SECURITY & AUDIT LOGS TAB (Section 1) */}
+        {activeTab === 'security' && (
+          <div className="space-y-6">
+            {/* Header info card */}
+            <div className="p-6 rounded-3xl bg-white dark:bg-[#181B20] border border-[#E8DEC8] dark:border-[#2E3440] shadow-xs">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-[#E8DEC8] dark:border-[#2E3440]">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-2xl bg-[#B3122B]/10 text-[#B3122B] flex items-center justify-center font-bold">
+                    <Shield className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-black text-[#1A1A1A] dark:text-white">
+                      Admin Workstation Device Binding & Security
+                    </h2>
+                    <p className="text-xs text-gray-500">
+                      Hardware-level cookie token binding, IP whitelisting, lockout protection, and tamper audit logs.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={loadAuditLogs}
+                    disabled={loadingAuditLogs}
+                    className="px-3.5 py-2 rounded-xl text-xs font-bold bg-[#FCF9F2] dark:bg-[#111317] border border-[#E8DEC8] dark:border-[#2E3440] hover:border-[#B3122B] text-gray-700 dark:text-gray-200 transition-colors flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${loadingAuditLogs ? 'animate-spin' : ''}`} />
+                    <span>Refresh Logs</span>
+                  </button>
+                  <button
+                    onClick={() => setShowResetDeviceModal(true)}
+                    className="px-3.5 py-2 rounded-xl text-xs font-bold bg-red-600 text-white hover:bg-red-700 transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
+                  >
+                    <Lock className="w-3.5 h-3.5" />
+                    <span>Unbind / Reset Workstation</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Status Metric Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-6">
+                <div className="p-4 rounded-2xl bg-[#FCF9F2] dark:bg-[#111317] border border-[#E8DEC8] dark:border-[#2E3440]">
+                  <div className="flex items-center justify-between text-xs text-gray-500 font-bold mb-1">
+                    <span>Binding Status</span>
+                    <Laptop className="w-4 h-4 text-emerald-600" />
+                  </div>
+                  <div className="text-base font-extrabold text-emerald-600 flex items-center gap-1.5">
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>Device Bound</span>
+                  </div>
+                  <div className="text-[11px] text-gray-500 mt-1 truncate" title={deviceStatus?.deviceName}>
+                    Name: <strong className="text-gray-800 dark:text-gray-200">{deviceStatus?.deviceName || "Vedant's Primary Workstation"}</strong>
+                  </div>
+                </div>
+
+                <div className="p-4 rounded-2xl bg-[#FCF9F2] dark:bg-[#111317] border border-[#E8DEC8] dark:border-[#2E3440]">
+                  <div className="flex items-center justify-between text-xs text-gray-500 font-bold mb-1">
+                    <span>Device Token Hash</span>
+                    <KeyRound className="w-4 h-4 text-[#B3122B]" />
+                  </div>
+                  <div className="text-xs font-mono font-bold text-gray-800 dark:text-gray-200 bg-white dark:bg-[#1A1D24] p-1.5 rounded-lg border border-[#E8DEC8] dark:border-[#2E3440] truncate">
+                    SHA-256 (httpOnly, Signed)
+                  </div>
+                  <div className="text-[10px] text-gray-400 mt-1">
+                    Cookie: <span className="font-mono">admin_device_token</span> (SameSite=Strict)
+                  </div>
+                </div>
+
+                <div className="p-4 rounded-2xl bg-[#FCF9F2] dark:bg-[#111317] border border-[#E8DEC8] dark:border-[#2E3440]">
+                  <div className="flex items-center justify-between text-xs text-gray-500 font-bold mb-1">
+                    <span>IP Address Guard</span>
+                    <Server className="w-4 h-4 text-blue-600" />
+                  </div>
+                  <div className="text-xs font-bold text-gray-800 dark:text-gray-200">
+                    Client IP: <span className="font-mono text-blue-600">{deviceStatus?.clientIp || "127.0.0.1"}</span>
+                  </div>
+                  <div className="text-[10px] text-gray-400 mt-1">
+                    ADMIN_ALLOWED_IPS: {deviceStatus?.allowedIpsConfigured ? "Enforced" : "Permissive (All Valid Bound IPs)"}
+                  </div>
+                </div>
+
+                <div className="p-4 rounded-2xl bg-[#FCF9F2] dark:bg-[#111317] border border-[#E8DEC8] dark:border-[#2E3440]">
+                  <div className="flex items-center justify-between text-xs text-gray-500 font-bold mb-1">
+                    <span>Rate Limiter</span>
+                    <ShieldAlert className="w-4 h-4 text-amber-600" />
+                  </div>
+                  <div className="text-xs font-bold text-emerald-600">
+                    Max 5 Attempts / 15m
+                  </div>
+                  <div className="text-[10px] text-gray-400 mt-1">
+                    Lockout: 15-minute temporary lockout on repeated failures
+                  </div>
+                </div>
+              </div>
+
+              {/* Warning note */}
+              <div className="mt-4 p-3 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-800 dark:text-amber-300 text-xs">
+                <strong>Strict Device Lock Enabled:</strong> Any administrator login from another device or incognito window without the bound device token will receive a generic 401 <em>"Authentication failed. Invalid credentials or unauthorized device."</em> and log an audit security event with the remote IP and User-Agent.
+              </div>
+            </div>
+
+            {/* Audit Logs Table */}
+            <div className="bg-white dark:bg-[#181B20] rounded-3xl border border-[#E8DEC8] dark:border-[#2E3440] p-6 shadow-xs">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-[#E8DEC8] dark:border-[#2E3440] mb-4 gap-3">
+                <div className="flex items-center gap-2">
+                  <Activity className="w-4 h-4 text-[#B3122B]" />
+                  <h3 className="font-extrabold text-sm text-[#1A1A1A] dark:text-white">
+                    Admin Security Audit Trail ({auditLogs.length} events)
+                  </h3>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="relative">
+                    <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-gray-400" />
+                    <input
+                      type="text"
+                      placeholder="Search IP, action, reason..."
+                      value={auditLogSearch}
+                      onChange={(e) => setAuditLogSearch(e.target.value)}
+                      className="pl-8 pr-3 py-1.5 rounded-xl border border-[#E8DEC8] dark:border-[#2E3440] bg-[#FCF9F2] dark:bg-[#111317] text-xs text-[#1A1A1A] dark:text-white placeholder:text-gray-400 focus:outline-hidden focus:border-[#B3122B] w-48 sm:w-64"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {(() => {
+                const filteredAuditLogs = auditLogs.filter(log => {
+                  if (!auditLogSearch.trim()) return true;
+                  const q = auditLogSearch.toLowerCase();
+                  return (
+                    (log.ip && log.ip.toLowerCase().includes(q)) ||
+                    (log.action && log.action.toLowerCase().includes(q)) ||
+                    (log.reason && log.reason.toLowerCase().includes(q)) ||
+                    (log.details && log.details.toLowerCase().includes(q)) ||
+                    (log.userAgent && log.userAgent.toLowerCase().includes(q)) ||
+                    (log.deviceName && log.deviceName.toLowerCase().includes(q))
+                  );
+                });
+
+                if (filteredAuditLogs.length === 0) {
+                  return (
+                    <div className="text-center py-12 text-gray-400">
+                      <ShieldCheck className="w-10 h-10 text-emerald-500 mx-auto mb-2 opacity-60" />
+                      <div className="font-bold text-sm text-gray-700 dark:text-gray-300">
+                        {auditLogSearch ? 'No Matching Security Events Found' : 'No Security Incidents Logged'}
+                      </div>
+                      <p className="text-xs text-gray-400 mt-1 max-w-sm mx-auto">
+                        {auditLogSearch ? 'Try a different IP address, action, or keyword.' : 'All authentication events, device registrations, and failed attempts are recorded here.'}
+                      </p>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-[#FCF9F2] dark:bg-[#111317] border-b border-[#E8DEC8] dark:border-[#2E3440] text-gray-500 font-bold uppercase tracking-wider">
+                        <tr>
+                          <th className="py-2.5 px-3">Timestamp</th>
+                          <th className="py-2.5 px-3">Action</th>
+                          <th className="py-2.5 px-3">Status / Outcome</th>
+                          <th className="py-2.5 px-3">Client IP</th>
+                          <th className="py-2.5 px-3">User Agent & Context</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[#E8DEC8]/50 dark:divide-[#2E3440]/50">
+                        {filteredAuditLogs.map((log) => {
+                          const isSuccess = log.action === 'DEVICE_REGISTERED' || log.action === 'ADMIN_LOGIN_SUCCESS' || log.action === 'admin_login' || log.action === 'device_registered' || log.success === true;
+                          const isBlocked = log.action === 'UNREGISTERED_DEVICE_BLOCKED' || log.action === 'RATE_LIMIT_LOCKOUT' || log.success === false;
+                          const outcomeText = log.reason || log.details || log.outcome || (log.success ? "Success" : "Failed");
+                          return (
+                            <tr key={log.id || log.timestamp + Math.random()} className="hover:bg-[#FCF9F2]/50 dark:hover:bg-[#14171C]">
+                              <td className="py-2.5 px-3 font-mono text-gray-500 whitespace-nowrap">
+                                {new Date(log.timestamp).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })} IST
+                              </td>
+                              <td className="py-2.5 px-3 font-bold">
+                                <span className={`px-2 py-0.5 rounded text-[10px] uppercase font-mono ${
+                                  isSuccess ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300' :
+                                  isBlocked ? 'bg-red-100 text-red-800 dark:bg-red-950/40 dark:text-red-300' :
+                                  'bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300'
+                                }`}>
+                                  {log.action}
+                                </span>
+                              </td>
+                              <td className="py-2.5 px-3 text-gray-700 dark:text-gray-300">
+                                {outcomeText}
+                              </td>
+                              <td className="py-2.5 px-3 font-mono text-gray-600 dark:text-gray-400">
+                                {log.ip}
+                              </td>
+                              <td className="py-2.5 px-3 text-gray-500 max-w-xs truncate" title={log.userAgent}>
+                                {log.userAgent}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Blocked Browser & Proctoring Violations View (Section 1 & 3) */}
+            <div className="bg-white dark:bg-[#181B20] rounded-3xl border border-[#E8DEC8] dark:border-[#2E3440] p-6 shadow-xs space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-[#E8DEC8] dark:border-[#2E3440] gap-2">
+                <div className="flex items-center gap-2">
+                  <ShieldAlert className="w-5 h-5 text-red-600" />
+                  <div>
+                    <h3 className="font-extrabold text-sm text-[#1A1A1A] dark:text-white">
+                      Blocked Browser & Proctoring Violations ({blockedAttempts.length})
+                    </h3>
+                    <p className="text-[11px] text-gray-500">
+                      Logged instances of embedded webviews, automation, virtual cameras, or mobile attempts blocked from starting tasks.
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  onClick={loadBlockedAttemptsAndWhitelists}
+                  className="px-3 py-1.5 rounded-xl text-xs font-bold bg-[#F5EFEB] dark:bg-[#252A34] text-gray-700 dark:text-gray-300 hover:text-[#B3122B] border border-[#E8DEC8] dark:border-[#2E3440] transition-colors flex items-center gap-1.5 cursor-pointer self-start sm:self-auto"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${loadingBlockedAttempts ? 'animate-spin' : ''}`} />
+                  <span>Refresh Violations</span>
+                </button>
+              </div>
+
+              {blockedAttempts.length === 0 ? (
+                <div className="text-center py-8 text-gray-400">
+                  <CheckCircle2 className="w-8 h-8 text-emerald-500 mx-auto mb-2 opacity-60" />
+                  <div className="font-bold text-xs text-gray-700 dark:text-gray-300">
+                    No Blocked Attempts Recorded
+                  </div>
+                  <p className="text-[11px] text-gray-400 mt-0.5">
+                    No unsupported browsers or spoofed devices have attempted test pre-checks.
+                  </p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-[#FCF9F2] dark:bg-[#111317] border-b border-[#E8DEC8] dark:border-[#2E3440] text-gray-500 font-bold uppercase tracking-wider text-[10px]">
+                      <tr>
+                        <th className="py-2.5 px-3">Timestamp</th>
+                        <th className="py-2.5 px-3">Student</th>
+                        <th className="py-2.5 px-3">Block Reason</th>
+                        <th className="py-2.5 px-3">Detected Signals</th>
+                        <th className="py-2.5 px-3">IP / Device UA</th>
+                        <th className="py-2.5 px-3 text-right">Quick Whitelist</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#E8DEC8]/50 dark:divide-[#2E3440]/50">
+                      {blockedAttempts.map((attempt) => (
+                        <tr key={attempt.id} className="hover:bg-[#FCF9F2]/50 dark:hover:bg-[#14171C]">
+                          <td className="py-2.5 px-3 font-mono text-gray-500 whitespace-nowrap text-[11px]">
+                            {new Date(attempt.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <div className="font-bold text-[#1A1A1A] dark:text-white">{attempt.studentName || 'Student'}</div>
+                            <div className="font-mono text-[10px] text-gray-400">{attempt.prn || attempt.userId}</div>
+                          </td>
+                          <td className="py-2.5 px-3 font-semibold text-red-600 dark:text-red-400 max-w-xs">
+                            {attempt.reason}
+                          </td>
+                          <td className="py-2.5 px-3 text-gray-600 dark:text-gray-300">
+                            {attempt.signals && attempt.signals.length > 0 ? (
+                              <div className="flex flex-wrap gap-1">
+                                {attempt.signals.map((sig, sIdx) => (
+                                  <span key={sIdx} className="px-1.5 py-0.5 rounded bg-red-100 dark:bg-red-950/40 text-red-700 dark:text-red-300 text-[10px]">
+                                    {sig}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : (
+                              <span className="text-gray-400 text-[10px]">General check failure</span>
+                            )}
+                          </td>
+                          <td className="py-2.5 px-3 text-gray-500 font-mono text-[10px] max-w-xs truncate" title={attempt.userAgent}>
+                            {attempt.ip} • {attempt.userAgent}
+                          </td>
+                          <td className="py-2.5 px-3 text-right">
+                            <button
+                              onClick={async () => {
+                                const notes = window.prompt(`Whitelist reason for ${attempt.studentName} (${attempt.prn}):`, "Faculty verified exception");
+                                if (notes !== null) {
+                                  const res = await whitelistStudentApi({
+                                    userId: attempt.userId,
+                                    prn: attempt.prn,
+                                    studentName: attempt.studentName,
+                                    notes: notes.trim() || 'Admin manual exception'
+                                  });
+                                  if (res.success) {
+                                    setAdminToast(`Student ${attempt.studentName} whitelisted successfully.`);
+                                    setTimeout(() => setAdminToast(''), 3500);
+                                    loadBlockedAttemptsAndWhitelists();
+                                  }
+                                }
+                              }}
+                              className="px-2.5 py-1 rounded-lg bg-emerald-100 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 font-bold text-[10px] hover:bg-emerald-200 transition-colors cursor-pointer"
+                            >
+                              Allow Exception
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {/* Student Whitelist & Exception Manager (Section 4) */}
+            <div className="bg-white dark:bg-[#181B20] rounded-3xl border border-[#E8DEC8] dark:border-[#2E3440] p-6 shadow-xs space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-[#E8DEC8] dark:border-[#2E3440]">
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className="w-5 h-5 text-emerald-600" />
+                  <div>
+                    <h3 className="font-extrabold text-sm text-[#1A1A1A] dark:text-white">
+                      Student Hardware & Browser Whitelist Exceptions ({whitelistedStudents.length})
+                    </h3>
+                    <p className="text-[11px] text-gray-500">
+                      Whitelisted students are exempt from strict browser version/device checks upon mentor approval.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Add Whitelist Form */}
+              <div className="bg-[#FCF9F2] dark:bg-[#111317] p-4 rounded-2xl border border-[#E8DEC8] dark:border-[#2E3440] flex flex-col sm:flex-row items-end gap-3 text-xs">
+                <div className="flex-1 w-full">
+                  <label className="block text-[10px] font-bold uppercase text-gray-500 mb-1">Roll No / PRN</label>
+                  <input
+                    type="text"
+                    value={whitelistPrnInput}
+                    onChange={(e) => setWhitelistPrnInput(e.target.value)}
+                    placeholder="e.g. 72184912B"
+                    className="w-full p-2 rounded-xl border border-[#E8DEC8] dark:border-[#2E3440] bg-white dark:bg-[#181B20] text-xs font-mono"
+                  />
+                </div>
+                <div className="flex-1 w-full">
+                  <label className="block text-[10px] font-bold uppercase text-gray-500 mb-1">Student Name</label>
+                  <input
+                    type="text"
+                    value={whitelistNameInput}
+                    onChange={(e) => setWhitelistNameInput(e.target.value)}
+                    placeholder="e.g. Rahul Sharma"
+                    className="w-full p-2 rounded-xl border border-[#E8DEC8] dark:border-[#2E3440] bg-white dark:bg-[#181B20] text-xs"
+                  />
+                </div>
+                <div className="flex-1 w-full">
+                  <label className="block text-[10px] font-bold uppercase text-gray-500 mb-1">Reason / Notes</label>
+                  <input
+                    type="text"
+                    value={whitelistNotesInput}
+                    onChange={(e) => setWhitelistNotesInput(e.target.value)}
+                    placeholder="e.g. Hardware exception verified"
+                    className="w-full p-2 rounded-xl border border-[#E8DEC8] dark:border-[#2E3440] bg-white dark:bg-[#181B20] text-xs"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (!whitelistPrnInput.trim()) {
+                      alert("Please enter student Roll No / PRN.");
+                      return;
+                    }
+                    const res = await whitelistStudentApi({
+                      prn: whitelistPrnInput.trim(),
+                      userId: whitelistPrnInput.trim(),
+                      studentName: whitelistNameInput.trim() || 'Student',
+                      notes: whitelistNotesInput.trim() || 'Faculty mentor exception'
+                    });
+                    if (res.success) {
+                      setWhitelistPrnInput('');
+                      setWhitelistNameInput('');
+                      setWhitelistNotesInput('');
+                      setAdminToast("Student exception whitelisted successfully.");
+                      setTimeout(() => setAdminToast(''), 3000);
+                      loadBlockedAttemptsAndWhitelists();
+                    }
+                  }}
+                  className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs cursor-pointer shrink-0 transition-colors"
+                >
+                  Add Whitelist Exception
+                </button>
+              </div>
+
+              {/* Active Whitelists List */}
+              {whitelistedStudents.length > 0 && (
+                <div className="space-y-2 pt-1">
+                  {whitelistedStudents.map((white) => (
+                    <div key={white.id} className="p-3 rounded-2xl bg-gray-50 dark:bg-[#14171C] border border-gray-200 dark:border-gray-800 flex items-center justify-between text-xs">
+                      <div>
+                        <div className="font-bold text-[#1A1A1A] dark:text-white flex items-center gap-2">
+                          <span>{white.studentName}</span>
+                          <span className="font-mono text-gray-500 text-[11px]">({white.prn})</span>
+                        </div>
+                        <div className="text-[11px] text-gray-500 mt-0.5">
+                          Reason: <em>{white.notes}</em> • Whitelisted: {new Date(white.whitelistedAt).toLocaleDateString()}
+                        </div>
+                      </div>
+                      <button
+                        onClick={async () => {
+                          if (window.confirm(`Remove whitelist exception for ${white.studentName}?`)) {
+                            await removeWhitelistApi(white.userId || white.prn);
+                            setAdminToast("Removed whitelist exception.");
+                            setTimeout(() => setAdminToast(''), 3000);
+                            loadBlockedAttemptsAndWhitelists();
+                          }
+                        }}
+                        className="text-red-500 hover:text-red-700 font-bold text-xs cursor-pointer"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* JUDGING CRITERIA & PROCTORING SETTINGS TAB (Section 2 & 3) */}
+        {activeTab === 'examsettings' && (
+          <div className="space-y-6">
+            <div className="p-6 rounded-3xl bg-white dark:bg-[#181B20] border border-[#E8DEC8] dark:border-[#2E3440] shadow-xs">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-[#E8DEC8] dark:border-[#2E3440]">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-2xl bg-[#B3122B]/10 text-[#B3122B] flex items-center justify-center font-bold">
+                    <Sliders className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-black text-[#1A1A1A] dark:text-white">
+                      Quiz Judging Criteria & Proctoring Control
+                    </h2>
+                    <p className="text-xs text-gray-500">
+                      Configure quiz rules, negative marking, timer duration, AI camera thresholds, and mandatory guidelines text.
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  onClick={async () => {
+                    updateExamSettings(localExamSettings);
+                    await saveExamSettings({ judgingSettings: localExamSettings, proctoringSettings: localExamSettings });
+                    setAdminToast("Quiz Judging Criteria & Proctoring configuration saved successfully!");
+                    setTimeout(() => setAdminToast(''), 4000);
+                  }}
+                  className="px-5 py-2.5 rounded-xl text-xs font-extrabold bg-[#B3122B] text-white hover:bg-[#8B0D20] shadow-sm shadow-[#B3122B]/20 transition-all flex items-center gap-2 cursor-pointer self-start md:self-auto"
+                >
+                  <CheckCircle className="w-4 h-4" />
+                  <span>Save All Settings</span>
+                </button>
+              </div>
+
+              {/* Form Controls */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6 text-xs">
+                {/* Column 1: Quiz Scoring & Duration */}
+                <div className="space-y-4">
+                  <h3 className="font-bold text-sm text-[#1A1A1A] dark:text-white flex items-center gap-2">
+                    <BookOpen className="w-4 h-4 text-[#B3122B]" />
+                    <span>Quiz Scoring & Timing Rules</span>
+                  </h3>
+
+                  <div>
+                    <label className="block font-bold text-gray-700 dark:text-gray-300 mb-1">
+                      Negative Marking Deduction per Incorrect Answer
+                    </label>
+                    <div className="grid grid-cols-4 gap-2">
+                      {[0, 0.25, 0.5, 1.0].map((val) => (
+                        <button
+                          key={val}
+                          type="button"
+                          onClick={() => setLocalExamSettings(s => ({ ...s, negativeMarking: val }))}
+                          className={`py-2 rounded-xl font-bold border transition-all cursor-pointer ${
+                            localExamSettings.negativeMarking === val
+                              ? 'bg-[#B3122B] text-white border-[#B3122B]'
+                              : 'bg-[#FCF9F2] dark:bg-[#111317] text-gray-700 dark:text-gray-300 border-[#E8DEC8] dark:border-[#2E3440] hover:border-[#B3122B]'
+                          }`}
+                        >
+                          {val === 0 ? "None (0)" : `-${val} pt`}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="text-[11px] text-gray-400 mt-1">
+                      Default is none (0). Subtracted from student quiz score per wrong selection.
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-gray-700 dark:text-gray-300 mb-1">
+                      Quiz Time Limit (Seconds)
+                    </label>
+                    <input
+                      type="number"
+                      min={60}
+                      max={3600}
+                      step={30}
+                      value={localExamSettings.quizTimeLimitSeconds}
+                      onChange={(e) => setLocalExamSettings(s => ({ ...s, quizTimeLimitSeconds: parseInt(e.target.value, 10) || 600 }))}
+                      className="w-full p-2.5 rounded-xl border border-[#E8DEC8] dark:border-[#2E3440] bg-[#FCF9F2] dark:bg-[#111317] font-mono font-bold text-sm text-[#1A1A1A] dark:text-white"
+                    />
+                    <p className="text-[11px] text-gray-400 mt-1">
+                      {Math.floor(localExamSettings.quizTimeLimitSeconds / 60)} minutes {localExamSettings.quizTimeLimitSeconds % 60} seconds. Auto-submits answers when time expires.
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-gray-700 dark:text-gray-300 mb-1">
+                      Minimum Passing Mark for Certificate Eligibility (out of 100)
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={100}
+                      value={localExamSettings.passMark ?? 50}
+                      onChange={(e) => setLocalExamSettings(s => ({ ...s, passMark: parseInt(e.target.value, 10) || 50 }))}
+                      className="w-full p-2.5 rounded-xl border border-[#E8DEC8] dark:border-[#2E3440] bg-[#FCF9F2] dark:bg-[#111317] font-mono font-bold text-sm text-[#1A1A1A] dark:text-white"
+                    />
+                    <p className="text-[11px] text-gray-400 mt-1">
+                      Default is 50. Students with cumulative points ≥ this score without disqualification receive certificates.
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-gray-700 dark:text-gray-300 mb-1">
+                      Program Task Evaluation Ratio (Fixed Standard)
+                    </label>
+                    <div className="p-3 rounded-2xl bg-[#FCF9F2] dark:bg-[#111317] border border-[#E8DEC8] dark:border-[#2E3440] space-y-1">
+                      <div className="flex justify-between">
+                        <span className="text-gray-500">Test Case Correctness:</span>
+                        <strong className="text-emerald-600">80% of task points</strong>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-500">Algorithmic Efficiency & Complexity:</span>
+                        <strong className="text-blue-600">10% of task points</strong>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-500">Code Quality & Formatting:</span>
+                        <strong className="text-purple-600">10% of task points</strong>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Column 2: Proctoring & Disqualification */}
+                <div className="space-y-4">
+                  <h3 className="font-bold text-sm text-[#1A1A1A] dark:text-white flex items-center gap-2">
+                    <ShieldAlert className="w-4 h-4 text-[#B3122B]" />
+                    <span>Proctoring & Disqualification Engine</span>
+                  </h3>
+
+                  <div>
+                    <label className="block font-bold text-gray-700 dark:text-gray-300 mb-1">
+                      Tab Switch & Fullscreen Exit Policy
+                    </label>
+                    <select
+                      value={localExamSettings.violationMode}
+                      onChange={(e) => setLocalExamSettings(s => ({ ...s, violationMode: e.target.value }))}
+                      className="w-full p-2.5 rounded-xl border border-[#E8DEC8] dark:border-[#2E3440] bg-[#FCF9F2] dark:bg-[#111317] font-bold text-xs text-[#1A1A1A] dark:text-white"
+                    >
+                      <option value="immediate_exit">Strict Immediate Exit (0 Warnings - Instant Disqualification)</option>
+                      <option value="warning_then_exit">Warning Once, Then Exit on 2nd Violation</option>
+                    </select>
+                    <p className="text-[11px] text-gray-400 mt-1">
+                      When triggered, the test terminates immediately, saves partial score, marks "Exited: tab switch", and locks re-entry.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block font-bold text-gray-700 dark:text-gray-300 mb-1">
+                        No Face Timeout (Seconds)
+                      </label>
+                      <input
+                        type="number"
+                        min={3}
+                        max={60}
+                        value={localExamSettings.noFaceSeconds}
+                        onChange={(e) => setLocalExamSettings(s => ({ ...s, noFaceSeconds: parseInt(e.target.value, 10) || 10 }))}
+                        className="w-full p-2.5 rounded-xl border border-[#E8DEC8] dark:border-[#2E3440] bg-[#FCF9F2] dark:bg-[#111317] font-mono font-bold text-xs"
+                      />
+                      <span className="text-[10px] text-gray-400">Exit if face is absent for &gt; N secs</span>
+                    </div>
+
+                    <div>
+                      <label className="block font-bold text-gray-700 dark:text-gray-300 mb-1">
+                        Phone Confidence (COCO-SSD)
+                      </label>
+                      <input
+                        type="number"
+                        min={0.3}
+                        max={0.95}
+                        step={0.05}
+                        value={localExamSettings.phoneConfidence}
+                        onChange={(e) => setLocalExamSettings(s => ({ ...s, phoneConfidence: parseFloat(e.target.value) || 0.55 }))}
+                        className="w-full p-2.5 rounded-xl border border-[#E8DEC8] dark:border-[#2E3440] bg-[#FCF9F2] dark:bg-[#111317] font-mono font-bold text-xs"
+                      />
+                      <span className="text-[10px] text-gray-400">Threshold for cell phone detection</span>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-gray-700 dark:text-gray-300 mb-1">
+                      Admin Custom Announcement for Judging Guidelines Screen
+                    </label>
+                    <textarea
+                      rows={3}
+                      value={localExamSettings.judgingCriteriaText}
+                      onChange={(e) => setLocalExamSettings(s => ({ ...s, judgingCriteriaText: e.target.value }))}
+                      placeholder="e.g. Special Instructions: Day 1 quiz questions are based on fundamental syntax. Negative marking is waived for today."
+                      className="w-full p-2.5 rounded-xl border border-[#E8DEC8] dark:border-[#2E3440] bg-[#FCF9F2] dark:bg-[#111317] text-xs"
+                    />
+                    <span className="text-[10px] text-gray-400">
+                      Renders directly at top of the student's pre-quiz agreement dialog.
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Tie-breaker & Ranking Summary */}
+              <div className="mt-6 pt-4 border-t border-[#E8DEC8] dark:border-[#2E3440] text-xs">
+                <div className="font-bold text-gray-700 dark:text-gray-300 mb-2">
+                  Official Tie-Breaker & Ranking Rules (Active System-Wide)
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="p-3 rounded-2xl bg-[#FCF9F2] dark:bg-[#111317] border border-[#E8DEC8] dark:border-[#2E3440]">
+                    <div className="font-bold text-[#B3122B]">1. Higher Score First</div>
+                    <p className="text-[11px] text-gray-500 mt-1">Total points across test case correctness & quiz score.</p>
+                  </div>
+                  <div className="p-3 rounded-2xl bg-[#FCF9F2] dark:bg-[#111317] border border-[#E8DEC8] dark:border-[#2E3440]">
+                    <div className="font-bold text-[#B3122B]">2. Less Time Taken</div>
+                    <p className="text-[11px] text-gray-500 mt-1">Faster test completion timestamp breaks score ties.</p>
+                  </div>
+                  <div className="p-3 rounded-2xl bg-[#FCF9F2] dark:bg-[#111317] border border-[#E8DEC8] dark:border-[#2E3440]">
+                    <div className="font-bold text-[#B3122B]">3. Pass Criteria</div>
+                    <p className="text-[11px] text-gray-500 mt-1">≥50 / 100 final points, 0 unresolved flags, passed live vivas.</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Server CLI Recovery Instructions Modal */}
+        {showResetDeviceModal && (
+          <div className="fixed inset-0 z-[70] bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+            <div className="bg-white dark:bg-[#181B20] rounded-3xl p-6 sm:p-8 max-w-md w-full border border-[#E8DEC8] dark:border-[#2E3440] shadow-2xl">
+              <div className="flex items-center justify-between pb-3 border-b border-[#E8DEC8] dark:border-[#2E3440] mb-4">
+                <div className="flex items-center gap-2">
+                  <ShieldAlert className="w-5 h-5 text-[#B3122B]" />
+                  <h3 className="font-extrabold text-base text-[#1A1A1A] dark:text-white">
+                    Hardware Device Recovery Procedure
+                  </h3>
+                </div>
+                <button
+                  onClick={() => setShowResetDeviceModal(false)}
+                  className="text-gray-400 hover:text-gray-600 text-sm cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="space-y-4 text-xs">
+                <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-900 dark:text-amber-200">
+                  <p className="font-bold mb-1">Web-Based Unbinding is Permanently Disabled</p>
+                  <p className="text-[11px] leading-relaxed">
+                    Per institutional security policy, web-based device resets are prohibited so that stolen credentials cannot unbind your workstation.
+                  </p>
+                </div>
+
+                <div className="p-4 rounded-2xl bg-gray-50 dark:bg-[#121418] border border-[#E8DEC8] dark:border-[#2E3440] space-y-2">
+                  <span className="font-bold text-gray-700 dark:text-gray-300 block">
+                    Server Recovery Command (CLI Only):
+                  </span>
+                  <div className="p-2.5 rounded-xl bg-black text-emerald-400 font-mono text-[11px] select-all break-all">
+                    npm run admin:reset-device -- --setup-key=&lt;ADMIN_SETUP_KEY&gt;
+                  </div>
+                  <p className="text-[10px] text-gray-500 leading-relaxed">
+                    Execute this command directly in the host server terminal. It validates your secret <code className="font-mono text-[#B3122B]">ADMIN_SETUP_KEY</code>, clears the hardware device registry, and re-enables one-time setup mode.
+                  </p>
+                </div>
+
+                <div className="flex justify-end pt-2 border-t border-[#E8DEC8] dark:border-[#2E3440]">
+                  <button
+                    onClick={() => setShowResetDeviceModal(false)}
+                    className="px-4 py-2 rounded-xl font-bold bg-[#B3122B] text-white hover:bg-[#8B0D20] cursor-pointer shadow-xs"
+                  >
+                    Understood
+                  </button>
+                </div>
               </div>
             </div>
           </div>

@@ -24,7 +24,8 @@ export const MyCertificatePage = ({ setCurrentTab }) => {
     getStudentEligibility, 
     manualOverrides,
     resendRequests = {},
-    requestCertificateResend
+    requestCertificateResend,
+    resultsPublished
   } = useApp();
   const [copiedLink, setCopiedLink] = useState(false);
   const [resendToast, setResendToast] = useState('');
@@ -107,7 +108,7 @@ export const MyCertificatePage = ({ setCurrentTab }) => {
           </div>
         </div>
 
-        {myCert && eligibility.isEligible ? (
+        {myCert && eligibility.isEligible && (resultsPublished || user?.role === 'admin') ? (
           /* ISSUED CERTIFICATE DISPLAY (Section 3 & 4) */
           <div className="space-y-6">
             
@@ -251,16 +252,19 @@ export const MyCertificatePage = ({ setCurrentTab }) => {
             </button>
           </div>
         ) : summary.totalScore >= 50 ? (
-          /* PASSED BUT CERTIFICATE BEING GENERATED */
+          /* PASSED BUT EITHER RESULTS PENDING PUBLICATION OR CERTIFICATE GENERATION */
           <div className="bg-white dark:bg-[#181B20] rounded-3xl p-8 border border-[#E8DEC8] dark:border-[#2E3440] shadow-sm text-center max-w-xl mx-auto">
             <div className="w-16 h-16 rounded-full bg-emerald-500/10 text-emerald-600 flex items-center justify-center mx-auto mb-4">
               <FileCheck2 className="w-8 h-8" />
             </div>
             <h2 className="text-xl font-bold text-[#1A1A1A] dark:text-white">
-              Congratulations! You Passed the Code Sprint! 🎉
+              {resultsPublished ? "Congratulations! You Passed the Code Sprint! 🎉" : "Official Results Pending Publication ⏳"}
             </h2>
             <p className="text-xs text-gray-500 mt-2 leading-relaxed">
-              You scored <strong>{formatScore(summary.totalScore)} / 100 points</strong> (pass mark is 50). Your official certificate is queued for cryptographic release by the Technical Skill Development Hub.
+              {resultsPublished
+                ? `You scored ${formatScore(summary.totalScore)} / 100 points (pass mark is 50). Your official certificate is queued for cryptographic release by the Technical Skill Development Hub.`
+                : `You scored ${formatScore(summary.totalScore)} / 100 points. Evaluation of all submissions is currently underway. Certificates will be released and available for download here as soon as official sprint results are published by the faculty organizers.`
+              }
             </p>
             <div className="mt-6 p-4 rounded-2xl bg-[#FCF9F2] dark:bg-[#111317] border border-[#E8DEC8] dark:border-[#2E3440] text-xs text-left space-y-2">
               <div className="flex items-center justify-between">
@@ -276,8 +280,10 @@ export const MyCertificatePage = ({ setCurrentTab }) => {
                 <span className="font-bold text-emerald-600">{formatScore(summary.totalScore)} / 100 pts</span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-gray-500">Status:</span>
-                <span className="font-bold text-emerald-600">Passed (Pass Mark: 50)</span>
+                <span className="text-gray-500">Results Status:</span>
+                <span className={`font-bold ${resultsPublished ? 'text-emerald-600' : 'text-amber-600'}`}>
+                  {resultsPublished ? "Official Results Published" : "Pending Official Publication"}
+                </span>
               </div>
             </div>
           </div>

@@ -12,5 +12,623 @@
     "name": "SVIT Faculty Administrator",
     "department": "Technical Skill Development Hub",
     "rollNo": "SVIT-FACULTY"
-  }
+  },
+  "adminRateLimit": {
+    "failedAttempts": 0,
+    "lockedUntil": 0
+  },
+  "adminLoginLogs": [],
+  "adminDevice": null,
+  "proctoringExits": [],
+  "judgingSettings": {
+    "negativeMarking": 0.25,
+    "quizTimeLimitSeconds": 600,
+    "judgingCriteriaText": ""
+  },
+  "proctoringSettings": {
+    "violationMode": "immediate_exit",
+    "warningsAllowed": 0,
+    "noFaceSeconds": 10,
+    "phoneConfidence": 0.55
+  },
+  "resultsPublished": false,
+  "allowExitedStudentsForCert": false,
+  "activeTestSessions": [
+    {
+      "sessionId": "sess-1791820945145-588r",
+      "token": "TNV-SESS-b45c9721868483b819cdba9bce9b23242f4d69b6a9b6e24e0eee1c96df351d88",
+      "tokenHash": "8e4d5396025e0de8ad7e8d2bac5b850d99cfa5e6bdb04d1286f4ef32907e6856",
+      "userId": "test-student-6",
+      "prn": "72184906G",
+      "studentName": "Priya Joshi",
+      "day": 1,
+      "browserFingerprint": "fp_second_tab_user_6",
+      "clientIp": "::1",
+      "userAgent": "Unknown",
+      "createdAt": "2026-10-12T16:02:25.145Z",
+      "lastHeartbeatAt": 1791820945145,
+      "status": "active"
+    },
+    {
+      "sessionId": "sess-1791820945136-xcg9",
+      "token": "TNV-SESS-83417af979024e7407d68bd63110bb7c0cfdeddb27f1b33b5aa09d45d2c4d9a6",
+      "tokenHash": "7e6644c1d94bc023a229fc116c47cc6e678865f0287ec963e2ecc74a71741ea7",
+      "userId": "test-student-6",
+      "prn": "72184906G",
+      "studentName": "Priya Joshi",
+      "day": 1,
+      "browserFingerprint": "fp_legit_user_6",
+      "clientIp": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36",
+      "createdAt": "2026-10-12T16:02:25.136Z",
+      "lastHeartbeatAt": 1791820945143,
+      "status": "replaced_by_new_session",
+      "endedAt": "2026-10-12T16:02:25.145Z"
+    },
+    {
+      "sessionId": "sess-1791820764303-i0s7",
+      "token": "TNV-SESS-654c8f0eb0d1210cea16f4ec1342881db51c9d58fe9389c107cfccfc6c0755ec",
+      "tokenHash": "6e00b589c325d332a2926a8916a11b61637f031e6ae511eca64b1a91b9d28477",
+      "userId": "test-student-6",
+      "prn": "72184906G",
+      "studentName": "Priya Joshi",
+      "day": 1,
+      "browserFingerprint": "fp_second_tab_user_6",
+      "clientIp": "::1",
+      "userAgent": "Unknown",
+      "createdAt": "2026-10-12T15:59:24.303Z",
+      "lastHeartbeatAt": 1791820764303,
+      "status": "replaced_by_new_session",
+      "endedAt": "2026-10-12T16:02:25.136Z"
+    },
+    {
+      "sessionId": "sess-1791820764291-mfy1",
+      "token": "TNV-SESS-3f7c1637925724f69761eeb3f171b8e1471987ca8a08274e0093492f3e9e254d",
+      "tokenHash": "57c30fa4d7825a450104680943514843482e0e83ea74bfbca641659831b2609c",
+      "userId": "test-student-6",
+      "prn": "72184906G",
+      "studentName": "Priya Joshi",
+      "day": 1,
+      "browserFingerprint": "fp_legit_user_6",
+      "clientIp": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36",
+      "createdAt": "2026-10-12T15:59:24.291Z",
+      "lastHeartbeatAt": 1791820764300,
+      "status": "replaced_by_new_session",
+      "endedAt": "2026-10-12T15:59:24.303Z"
+    },
+    {
+      "sessionId": "sess-1791818129546-c9iz",
+      "token": "TNV-SESS-f0bd0ecc1cac81f1f44327c37c634b1dead427f570cae2451e7d3fed0b35c8f9",
+      "tokenHash": "28a73ebdb055df025ae5a9a486f2ef042b706472c8c14ca0bfa63c62ac7a10c2",
+      "userId": "test-student-6",
+      "prn": "72184906G",
+      "studentName": "Priya Joshi",
+      "day": 1,
+      "browserFingerprint": "fp_second_tab_user_6",
+      "clientIp": "::1",
+      "userAgent": "Unknown",
+      "createdAt": "2026-10-12T15:15:29.546Z",
+      "lastHeartbeatAt": 1791818129546,
+      "status": "replaced_by_new_session",
+      "endedAt": "2026-10-12T15:59:24.291Z"
+    },
+    {
+      "sessionId": "sess-1791818129536-1zth",
+      "token": "TNV-SESS-8693d770f7b540cd346d3da8896a9356c3542065aca3ab414c18dd975c26d9cc",
+      "tokenHash": "44ade5cdb00cd226181efc959aff137c0794bbe0732c261392e846fcbf18f640",
+      "userId": "test-student-6",
+      "prn": "72184906G",
+      "studentName": "Priya Joshi",
+      "day": 1,
+      "browserFingerprint": "fp_legit_user_6",
+      "clientIp": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36",
+      "createdAt": "2026-10-12T15:15:29.536Z",
+      "lastHeartbeatAt": 1791818129544,
+      "status": "replaced_by_new_session",
+      "endedAt": "2026-10-12T15:15:29.546Z"
+    },
+    {
+      "sessionId": "sess-1791817932875-m54i",
+      "token": "TNV-SESS-bffa9b8eeb5d56bafb37b618aa54d8962433e2bb1a72ac0f324035a3cb496071",
+      "tokenHash": "35db33685335820325c7a5dd6f101d04d3b8c772e1b9a69cabda8d9f411d184a",
+      "userId": "test-student-6",
+      "prn": "72184906G",
+      "studentName": "Priya Joshi",
+      "day": 1,
+      "browserFingerprint": "fp_second_tab_user_6",
+      "clientIp": "::1",
+      "userAgent": "Unknown",
+      "createdAt": "2026-10-12T15:12:12.875Z",
+      "lastHeartbeatAt": 1791817932875,
+      "status": "replaced_by_new_session",
+      "endedAt": "2026-10-12T15:15:29.535Z"
+    },
+    {
+      "sessionId": "sess-1791817932866-88v4",
+      "token": "TNV-SESS-ea1b3a4632ec01f8d2dfe13eb944c46cd99d5509a7d7d0970646496255e7f293",
+      "tokenHash": "e4438adab16c7d9990dbe38365397db6e533f06d12b22a13ed55912ff26ac223",
+      "userId": "test-student-6",
+      "prn": "72184906G",
+      "studentName": "Priya Joshi",
+      "day": 1,
+      "browserFingerprint": "fp_legit_user_6",
+      "clientIp": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36",
+      "createdAt": "2026-10-12T15:12:12.866Z",
+      "lastHeartbeatAt": 1791817932872,
+      "status": "replaced_by_new_session",
+      "endedAt": "2026-10-12T15:12:12.875Z"
+    },
+    {
+      "sessionId": "sess-1791817868041-3a1o",
+      "token": "TNV-SESS-84857284120acec08953093fbbac978730513c7ab11e47df85b6ddbeadee25c7",
+      "tokenHash": "d59509d0c06f0ef6e867134254ff1a5de2680b22c829123b1ceb41c87be447ec",
+      "userId": "test-student-6",
+      "prn": "72184906G",
+      "studentName": "Priya Joshi",
+      "day": 1,
+      "browserFingerprint": "fp_second_tab_user_6",
+      "clientIp": "::1",
+      "userAgent": "Unknown",
+      "createdAt": "2026-10-12T15:11:08.041Z",
+      "lastHeartbeatAt": 1791817868041,
+      "status": "replaced_by_new_session",
+      "endedAt": "2026-10-12T15:12:12.866Z"
+    },
+    {
+      "sessionId": "sess-1791817868028-qz2w",
+      "token": "TNV-SESS-f8d772180cb770b74b820a04d82959534902de8a29c1838d363ad51e19f9d754",
+      "tokenHash": "4517fba95dc135cd2ec9ffc468962a10d600c927976dbd8c27898e5c6482c478",
+      "userId": "test-student-6",
+      "prn": "72184906G",
+      "studentName": "Priya Joshi",
+      "day": 1,
+      "browserFingerprint": "fp_legit_user_6",
+      "clientIp": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36",
+      "createdAt": "2026-10-12T15:11:08.028Z",
+      "lastHeartbeatAt": 1791817868038,
+      "status": "replaced_by_new_session",
+      "endedAt": "2026-10-12T15:11:08.041Z"
+    },
+    {
+      "sessionId": "sess-1791811961643-7j9w",
+      "token": "TNV-SESS-cfeb65758b304c4cbb1e3eaafef729d4b90c0e5cb4f13b321d527aa6ab969f42",
+      "tokenHash": "2ac4b14485c05c9b861bd6d3c056e27321646ee8150840945d9e6c855a5c18c5",
+      "userId": "test-student-6",
+      "prn": "72184906G",
+      "studentName": "Priya Joshi",
+      "day": 1,
+      "browserFingerprint": "fp_second_tab_user_6",
+      "clientIp": "::1",
+      "userAgent": "Unknown",
+      "createdAt": "2026-10-12T13:32:41.643Z",
+      "lastHeartbeatAt": 1791811961643,
+      "status": "replaced_by_new_session",
+      "endedAt": "2026-10-12T15:11:08.028Z"
+    },
+    {
+      "sessionId": "sess-1791811961627-o14x",
+      "token": "TNV-SESS-5539e6d08ac286894a3ea403d09327617127bb52c8d1a2143b502f36fc65f81e",
+      "tokenHash": "4fcdc103b23cd5e5cd082051982bdeacaab9b7477412989510ee197118b998d1",
+      "userId": "test-student-6",
+      "prn": "72184906G",
+      "studentName": "Priya Joshi",
+      "day": 1,
+      "browserFingerprint": "fp_legit_user_6",
+      "clientIp": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36",
+      "createdAt": "2026-10-12T13:32:41.627Z",
+      "lastHeartbeatAt": 1791811961640,
+      "status": "replaced_by_new_session",
+      "endedAt": "2026-10-12T13:32:41.643Z"
+    }
+  ],
+  "studentConsents": [
+    {
+      "id": "consent-1791820945132-adz5",
+      "userId": "test-student-6",
+      "prn": "72184906G",
+      "studentName": "Priya Joshi",
+      "day": 1,
+      "fingerprint": "fp_legit_user_6",
+      "clientIp": "::1",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36",
+      "timestamp": "2026-10-12T16:02:25.132Z",
+      "details": {
+        "rulesAgreed": true,
+        "proctoringAgreed": true,
+        "cameraVerified": true,
+        "micVerified": true
+      }
+    }
+  ],
+  "blockedAttempts": [
+    {
+      "id": "block-1791820945129-en0g",
+      "userId": "test-student-5",
+      "prn": "72184905F",
+      "studentName": "Student",
+      "reason": "Virtual camera detected: \"OBS Virtual Camera\". Please switch to physical webcam.",
+      "signals": [
+        "Virtual camera detected: OBS Virtual Camera"
+      ],
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36",
+      "ip": "::1",
+      "timestamp": "2026-10-12T16:02:25.129Z"
+    },
+    {
+      "id": "block-1791820945126-2i5y",
+      "userId": "test-student-4",
+      "prn": "72184904E",
+      "studentName": "Student",
+      "reason": "Mobile devices and phone browsers are not supported. Please use desktop Google Chrome, Microsoft Edge, or Mozilla Firefox.",
+      "signals": [
+        "Server-detected mobile device",
+        "Platform says Windows (Win32) but UA claims mobile device"
+      ],
+      "userAgent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15",
+      "ip": "::1",
+      "timestamp": "2026-10-12T16:02:25.126Z"
+    },
+    {
+      "id": "block-1791820945123-ckl8",
+      "userId": "test-student-3",
+      "prn": "72184903D",
+      "studentName": "Student",
+      "reason": "Automated/Headless browser detected. Test automation is strictly prohibited.",
+      "signals": [
+        "Server-detected headless/automation browser",
+        "navigator.webdriver is true",
+        "HeadlessChrome signature"
+      ],
+      "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/118.0.0.0 Safari/537.36",
+      "ip": "::1",
+      "timestamp": "2026-10-12T16:02:25.123Z"
+    },
+    {
+      "id": "block-1791820945121-jyxv",
+      "userId": "test-student-2",
+      "prn": "72184902C",
+      "studentName": "Anjali Verma",
+      "reason": "In-app or embedded browser detected. Embedded webviews are strictly blocked. Please open in desktop Google Chrome, Microsoft Edge, or Mozilla Firefox.",
+      "signals": [
+        "Server-detected mobile device",
+        "Server-detected in-app webview",
+        "Embedded Instagram WebView"
+      ],
+      "userAgent": "Mozilla/5.0 (Linux; Android 13; SM-S908B) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/115.0.0.0 Mobile Safari/537.36 Instagram 300.0.0.0",
+      "ip": "::1",
+      "timestamp": "2026-10-12T16:02:25.121Z"
+    },
+    {
+      "id": "block-1791820764285-okdf",
+      "userId": "test-student-5",
+      "prn": "72184905F",
+      "studentName": "Student",
+      "reason": "Virtual camera detected: \"OBS Virtual Camera\". Please switch to physical webcam.",
+      "signals": [
+        "Virtual camera detected: OBS Virtual Camera"
+      ],
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36",
+      "ip": "::1",
+      "timestamp": "2026-10-12T15:59:24.285Z"
+    },
+    {
+      "id": "block-1791820764282-njp0",
+      "userId": "test-student-4",
+      "prn": "72184904E",
+      "studentName": "Student",
+      "reason": "Mobile devices and phone browsers are not supported. Please use desktop Google Chrome, Microsoft Edge, or Mozilla Firefox.",
+      "signals": [
+        "Server-detected mobile device",
+        "Platform says Windows (Win32) but UA claims mobile device"
+      ],
+      "userAgent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15",
+      "ip": "::1",
+      "timestamp": "2026-10-12T15:59:24.282Z"
+    },
+    {
+      "id": "block-1791820764280-7ryx",
+      "userId": "test-student-3",
+      "prn": "72184903D",
+      "studentName": "Student",
+      "reason": "Automated/Headless browser detected. Test automation is strictly prohibited.",
+      "signals": [
+        "Server-detected headless/automation browser",
+        "navigator.webdriver is true",
+        "HeadlessChrome signature"
+      ],
+      "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/118.0.0.0 Safari/537.36",
+      "ip": "::1",
+      "timestamp": "2026-10-12T15:59:24.280Z"
+    },
+    {
+      "id": "block-1791820764276-qb6l",
+      "userId": "test-student-2",
+      "prn": "72184902C",
+      "studentName": "Anjali Verma",
+      "reason": "In-app or embedded browser detected. Embedded webviews are strictly blocked. Please open in desktop Google Chrome, Microsoft Edge, or Mozilla Firefox.",
+      "signals": [
+        "Server-detected mobile device",
+        "Server-detected in-app webview",
+        "Embedded Instagram WebView"
+      ],
+      "userAgent": "Mozilla/5.0 (Linux; Android 13; SM-S908B) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/115.0.0.0 Mobile Safari/537.36 Instagram 300.0.0.0",
+      "ip": "::1",
+      "timestamp": "2026-10-12T15:59:24.276Z"
+    },
+    {
+      "id": "block-1791818129531-duvv",
+      "userId": "test-student-5",
+      "prn": "72184905F",
+      "studentName": "Student",
+      "reason": "Virtual camera detected: \"OBS Virtual Camera\". Please switch to physical webcam.",
+      "signals": [
+        "Virtual camera detected: OBS Virtual Camera"
+      ],
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36",
+      "ip": "::1",
+      "timestamp": "2026-10-12T15:15:29.531Z"
+    },
+    {
+      "id": "block-1791818129528-8u5w",
+      "userId": "test-student-4",
+      "prn": "72184904E",
+      "studentName": "Student",
+      "reason": "Mobile devices and phone browsers are not supported. Please use desktop Google Chrome, Microsoft Edge, or Mozilla Firefox.",
+      "signals": [
+        "Server-detected mobile device",
+        "Platform says Windows (Win32) but UA claims mobile device"
+      ],
+      "userAgent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15",
+      "ip": "::1",
+      "timestamp": "2026-10-12T15:15:29.528Z"
+    },
+    {
+      "id": "block-1791818129525-459b",
+      "userId": "test-student-3",
+      "prn": "72184903D",
+      "studentName": "Student",
+      "reason": "Automated/Headless browser detected. Test automation is strictly prohibited.",
+      "signals": [
+        "Server-detected headless/automation browser",
+        "navigator.webdriver is true",
+        "HeadlessChrome signature"
+      ],
+      "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/118.0.0.0 Safari/537.36",
+      "ip": "::1",
+      "timestamp": "2026-10-12T15:15:29.525Z"
+    },
+    {
+      "id": "block-1791818129522-jg2t",
+      "userId": "test-student-2",
+      "prn": "72184902C",
+      "studentName": "Anjali Verma",
+      "reason": "In-app or embedded browser detected. Embedded webviews are strictly blocked. Please open in desktop Google Chrome, Microsoft Edge, or Mozilla Firefox.",
+      "signals": [
+        "Server-detected mobile device",
+        "Server-detected in-app webview",
+        "Embedded Instagram WebView"
+      ],
+      "userAgent": "Mozilla/5.0 (Linux; Android 13; SM-S908B) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/115.0.0.0 Mobile Safari/537.36 Instagram 300.0.0.0",
+      "ip": "::1",
+      "timestamp": "2026-10-12T15:15:29.522Z"
+    },
+    {
+      "id": "block-1791817932860-huzn",
+      "userId": "test-student-5",
+      "prn": "72184905F",
+      "studentName": "Student",
+      "reason": "Virtual camera detected: \"OBS Virtual Camera\". Please switch to physical webcam.",
+      "signals": [
+        "Virtual camera detected: OBS Virtual Camera"
+      ],
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36",
+      "ip": "::1",
+      "timestamp": "2026-10-12T15:12:12.860Z"
+    },
+    {
+      "id": "block-1791817932857-gxmq",
+      "userId": "test-student-4",
+      "prn": "72184904E",
+      "studentName": "Student",
+      "reason": "Mobile devices and phone browsers are not supported. Please use desktop Google Chrome, Microsoft Edge, or Mozilla Firefox.",
+      "signals": [
+        "Server-detected mobile device",
+        "Platform says Windows (Win32) but UA claims mobile device"
+      ],
+      "userAgent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15",
+      "ip": "::1",
+      "timestamp": "2026-10-12T15:12:12.857Z"
+    },
+    {
+      "id": "block-1791817932853-mx8r",
+      "userId": "test-student-3",
+      "prn": "72184903D",
+      "studentName": "Student",
+      "reason": "Automated/Headless browser detected. Test automation is strictly prohibited.",
+      "signals": [
+        "Server-detected headless/automation browser",
+        "navigator.webdriver is true",
+        "HeadlessChrome signature"
+      ],
+      "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/118.0.0.0 Safari/537.36",
+      "ip": "::1",
+      "timestamp": "2026-10-12T15:12:12.853Z"
+    },
+    {
+      "id": "block-1791817932851-h4xr",
+      "userId": "test-student-2",
+      "prn": "72184902C",
+      "studentName": "Anjali Verma",
+      "reason": "In-app or embedded browser detected. Embedded webviews are strictly blocked. Please open in desktop Google Chrome, Microsoft Edge, or Mozilla Firefox.",
+      "signals": [
+        "Server-detected mobile device",
+        "Server-detected in-app webview",
+        "Embedded Instagram WebView"
+      ],
+      "userAgent": "Mozilla/5.0 (Linux; Android 13; SM-S908B) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/115.0.0.0 Mobile Safari/537.36 Instagram 300.0.0.0",
+      "ip": "::1",
+      "timestamp": "2026-10-12T15:12:12.851Z"
+    },
+    {
+      "id": "block-1791817868022-zl65",
+      "userId": "test-student-5",
+      "prn": "72184905F",
+      "studentName": "Student",
+      "reason": "Virtual camera detected: \"OBS Virtual Camera\". Please switch to physical webcam.",
+      "signals": [
+        "Virtual camera detected: OBS Virtual Camera"
+      ],
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36",
+      "ip": "::1",
+      "timestamp": "2026-10-12T15:11:08.022Z"
+    },
+    {
+      "id": "block-1791817868019-v8v2",
+      "userId": "test-student-4",
+      "prn": "72184904E",
+      "studentName": "Student",
+      "reason": "Mobile devices and phone browsers are not supported. Please use desktop Google Chrome, Microsoft Edge, or Mozilla Firefox.",
+      "signals": [
+        "Server-detected mobile device",
+        "Platform says Windows (Win32) but UA claims mobile device"
+      ],
+      "userAgent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15",
+      "ip": "::1",
+      "timestamp": "2026-10-12T15:11:08.019Z"
+    },
+    {
+      "id": "block-1791817868013-8vic",
+      "userId": "test-student-3",
+      "prn": "72184903D",
+      "studentName": "Student",
+      "reason": "Automated/Headless browser detected. Test automation is strictly prohibited.",
+      "signals": [
+        "Server-detected headless/automation browser",
+        "navigator.webdriver is true",
+        "HeadlessChrome signature"
+      ],
+      "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/118.0.0.0 Safari/537.36",
+      "ip": "::1",
+      "timestamp": "2026-10-12T15:11:08.013Z"
+    },
+    {
+      "id": "block-1791817868008-un3a",
+      "userId": "test-student-2",
+      "prn": "72184902C",
+      "studentName": "Anjali Verma",
+      "reason": "In-app or embedded browser detected. Embedded webviews are strictly blocked. Please open in desktop Google Chrome, Microsoft Edge, or Mozilla Firefox.",
+      "signals": [
+        "Server-detected mobile device",
+        "Server-detected in-app webview",
+        "Embedded Instagram WebView"
+      ],
+      "userAgent": "Mozilla/5.0 (Linux; Android 13; SM-S908B) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/115.0.0.0 Mobile Safari/537.36 Instagram 300.0.0.0",
+      "ip": "::1",
+      "timestamp": "2026-10-12T15:11:08.008Z"
+    },
+    {
+      "id": "block-1791811961618-82vk",
+      "userId": "test-student-5",
+      "prn": "72184905F",
+      "studentName": "Student",
+      "reason": "Virtual camera detected: \"OBS Virtual Camera\". Please switch to physical webcam.",
+      "signals": [
+        "Virtual camera detected: OBS Virtual Camera"
+      ],
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36",
+      "ip": "::1",
+      "timestamp": "2026-10-12T13:32:41.618Z"
+    },
+    {
+      "id": "block-1791811961614-dtcd",
+      "userId": "test-student-4",
+      "prn": "72184904E",
+      "studentName": "Student",
+      "reason": "Mobile devices and phone browsers are not supported. Please use desktop Google Chrome, Microsoft Edge, or Mozilla Firefox.",
+      "signals": [
+        "Server-detected mobile device",
+        "Platform says Windows (Win32) but UA claims mobile device"
+      ],
+      "userAgent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15",
+      "ip": "::1",
+      "timestamp": "2026-10-12T13:32:41.614Z"
+    },
+    {
+      "id": "block-1791811961611-f2xa",
+      "userId": "test-student-3",
+      "prn": "72184903D",
+      "studentName": "Student",
+      "reason": "Automated/Headless browser detected. Test automation is strictly prohibited.",
+      "signals": [
+        "Server-detected headless/automation browser",
+        "navigator.webdriver is true",
+        "HeadlessChrome signature"
+      ],
+      "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/118.0.0.0 Safari/537.36",
+      "ip": "::1",
+      "timestamp": "2026-10-12T13:32:41.611Z"
+    },
+    {
+      "id": "block-1791811961608-1x6x",
+      "userId": "test-student-2",
+      "prn": "72184902C",
+      "studentName": "Anjali Verma",
+      "reason": "In-app or embedded browser detected. Embedded webviews are strictly blocked. Please open in desktop Google Chrome, Microsoft Edge, or Mozilla Firefox.",
+      "signals": [
+        "Server-detected mobile device",
+        "Server-detected in-app webview",
+        "Embedded Instagram WebView"
+      ],
+      "userAgent": "Mozilla/5.0 (Linux; Android 13; SM-S908B) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/115.0.0.0 Mobile Safari/537.36 Instagram 300.0.0.0",
+      "ip": "::1",
+      "timestamp": "2026-10-12T13:32:41.608Z"
+    }
+  ],
+  "studentWhitelists": [
+    {
+      "id": "white-1791820945151",
+      "userId": "special-student-1",
+      "prn": "72184988X",
+      "studentName": "Amit Patil",
+      "notes": "Lab machine camera verified by faculty mentor",
+      "whitelistedAt": "2026-10-12T16:02:25.151Z"
+    }
+  ],
+  "certificateAudit": {
+    "generationCount": 0,
+    "downloadCount": 0,
+    "revocationCount": 0,
+    "verificationCount": 0,
+    "logs": [
+      {
+        "id": "audit-1791820915784-47ci",
+        "action": "verify_not_found",
+        "certificateId": "CERT-2026-NONEXISTENT",
+        "timestamp": "2026-10-12T16:01:55.784Z",
+        "clientIp": "127.0.0.1"
+      },
+      {
+        "id": "audit-1791820715666-ml4r",
+        "action": "verify_not_found",
+        "certificateId": "CERT-2026-NONEXISTENT",
+        "timestamp": "2026-10-12T15:58:35.666Z",
+        "clientIp": "127.0.0.1"
+      },
+      {
+        "id": "audit-1791820657635-cuc6",
+        "action": "verify_not_found",
+        "certificateId": "CERT-2026-NONEXISTENT",
+        "timestamp": "2026-10-12T15:57:37.635Z",
+        "clientIp": "127.0.0.1"
+      }
+    ]
+  },
+  "adminDevices": [],
+  "adminSessions": [],
+  "adminIpRateLimits": {}
 }

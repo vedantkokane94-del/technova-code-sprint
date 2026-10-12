@@ -14,6 +14,7 @@ import {
 import { getTaskVariant, calculateTextSimilarity, detectAiGeneratedContent } from '../utils/hash';
 import { calculateDayScore, computeUserSummary, formatScore, toScoreNumber, DAY_POINTS, PASS_MARK_POINTS, TOTAL_SPRINT_POINTS } from '../utils/scoring';
 import { DEFAULT_TEMPLATE_CONFIG } from '../utils/certificateGenerator';
+import { checkAdminSession, logoutAdminApi } from '../services/api';
 
 const AppContext = createContext();
 
@@ -358,6 +359,96 @@ export const AppProvider = ({ children }) => {
     });
   };
 
+  // Section 2 & 3: Exam Judging & Proctoring Settings
+  const DEFAULT_EXAM_SETTINGS = {
+    negativeMarking: 0,
+    quizTimeLimitSeconds: 600,
+    passMark: 50,
+    judgingCriteriaText: '',
+    violationMode: 'immediate_exit',
+    warningsAllowed: 0,
+    noFaceSeconds: 10,
+    phoneConfidence: 0.55
+  };
+
+  const [examSettings, setExamSettings] = useState(() => {
+    const saved = localStorage.getItem('technova_exam_settings');
+    if (saved) {
+      try { return { ...DEFAULT_EXAM_SETTINGS, ...JSON.parse(saved) }; } catch (e) {}
+    }
+    return DEFAULT_EXAM_SETTINGS;
+  });
+
+  const updateExamSettings = (patch) => {
+    setExamSettings(prev => {
+      const next = { ...prev, ...patch };
+      localStorage.setItem('technova_exam_settings', JSON.stringify(next));
+      fetch('/api/admin/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ judgingSettings: next, proctoringSettings: next }),
+        credentials: 'same-origin'
+      }).catch(() => {});
+      return next;
+    });
+  };
+
+  // Results Published and Certificate Eligibility Settings (synced with server)
+  const [resultsPublished, setResultsPublished] = useState(() => {
+    return localStorage.getItem('technova_results_published') === 'true';
+  });
+  const [allowExitedStudentsForCert, setAllowExitedStudentsForCert] = useState(() => {
+    return localStorage.getItem('technova_allow_exited_cert') === 'true';
+  });
+
+  useEffect(() => {
+    fetch('/api/certificates/public-settings')
+      .then(res => res.json())
+      .then(data => {
+        if (data) {
+          if (data.resultsPublished !== undefined) {
+            setResultsPublished(Boolean(data.resultsPublished));
+            localStorage.setItem('technova_results_published', String(Boolean(data.resultsPublished)));
+          }
+          if (data.allowExitedStudentsForCert !== undefined) {
+            setAllowExitedStudentsForCert(Boolean(data.allowExitedStudentsForCert));
+            localStorage.setItem('technova_allow_exited_cert', String(Boolean(data.allowExitedStudentsForCert)));
+          }
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const toggleResultsPublished = async (newVal) => {
+    const val = Boolean(newVal !== undefined ? newVal : !resultsPublished);
+    setResultsPublished(val);
+    localStorage.setItem('technova_results_published', String(val));
+    try {
+      await fetch('/api/certificates/toggle-settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ resultsPublished: val }),
+        credentials: 'same-origin'
+      });
+    } catch (e) {}
+    return val;
+  };
+
+  const toggleAllowExitedForCert = async (newVal) => {
+    const val = Boolean(newVal !== undefined ? newVal : !allowExitedStudentsForCert);
+    setAllowExitedStudentsForCert(val);
+    localStorage.setItem('technova_allow_exited_cert', String(val));
+    try {
+      await fetch('/api/certificates/toggle-settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ allowExitedStudentsForCert: val }),
+        credentials: 'same-origin'
+      });
+    } catch (e) {}
+    return val;
+  };
+
   // Admin Test Mode & Simulated Server Time
   const [adminTestMode, setAdminTestModeState] = useState(() => {
     return localStorage.getItem('technova_admin_test_mode') === 'true';
@@ -433,17 +524,20 @@ export const AppProvider = ({ children }) => {
     return Array.from(map.values());
   };
 
-  // Check eligibility for a student (50 or more points, not in Pending review, manual override check)
+  // Check eligibility for a student (pass mark points, not in Pending review, proctoring exit check, manual override check)
   const getStudentEligibility = (studentKey) => {
     const studentSubs = submissions.filter(s => s.userId === studentKey || s.prn === studentKey);
     const summary = computeUserSummary(studentSubs, manualOverrides[studentKey]);
     const totalScore = summary.totalScore;
     const hasFailedViva = studentSubs.some(s => s.failedViva);
     const hasUnresolvedFlag = studentSubs.some(s => s.needsViva || s.vivaRequired || s.status === 'flagged');
+    const hasDisqualification = studentSubs.some(s => s.status === 'exited' || s.quizDisqualified);
 
-    // Section 2: A student passes with 50 or more out of 100 after all 9 days are scored. Completing all 9 days is not required.
-    // Students with unresolved flags marked "Needs viva", or a failed viva, stay in "Pending review"
-    const autoEligible = totalScore >= 50 && !hasFailedViva && !hasUnresolvedFlag;
+    const passMark = Number(examSettings?.passMark) || 50;
+    const isBlockedByExit = hasDisqualification && !allowExitedStudentsForCert;
+
+    // Disqualified or exited students (tab switch, proctoring violation) are not eligible by default unless allowExitedStudentsForCert is enabled
+    const autoEligible = totalScore >= passMark && !hasFailedViva && !hasUnresolvedFlag && !isBlockedByExit;
     const isOverridden = manualOverrides[studentKey] !== undefined;
     const isEligible = isOverridden ? manualOverrides[studentKey] : autoEligible;
 
@@ -457,6 +551,8 @@ export const AppProvider = ({ children }) => {
       daysCount: summary.completedCount,
       hasFailedViva,
       hasUnresolvedFlag,
+      hasDisqualification,
+      isBlockedByExit,
       submissionsCount: studentSubs.length,
       progressStatus: summary.progressStatus
     };
@@ -702,32 +798,59 @@ export const AppProvider = ({ children }) => {
     "faculty@svit.ac.in"
   ];
 
-  // Admin Access Control (Section 8: Google sign-in required, verified email, name equals "Vedant Kokane")
+  // Server-Verified Administrator Session State
+  const [isServerAdminAuthenticated, setIsServerAdminAuthenticated] = useState(false);
+
+  // Synchronize and verify administrator session with server-side HttpOnly session cookie
+  useEffect(() => {
+    checkAdminSession().then(res => {
+      if (res && res.authenticated && res.user) {
+        setIsServerAdminAuthenticated(true);
+        setUser(res.user);
+      } else {
+        setIsServerAdminAuthenticated(false);
+        setUser(prev => (prev?.role === 'admin' ? null : prev));
+      }
+    }).catch(() => {
+      setIsServerAdminAuthenticated(false);
+    });
+  }, []);
+
+  // Admin Access Control: Server session must be verified (tamper-resistant)
   const isVedantAdmin = (u) => {
     if (!u) return false;
-    const nameMatch = u.name && u.name.trim().toLowerCase() === 'vedant kokane';
-    return Boolean(nameMatch || (u.role === 'admin' && nameMatch));
+    return Boolean(isServerAdminAuthenticated && (u.role === 'admin' || (u.name && u.name.trim().toLowerCase() === 'vedant kokane')));
   };
 
-  const isAdmin = Boolean(isVedantAdmin(user));
+  const isAdmin = Boolean(isServerAdminAuthenticated || (user?.role === 'admin' && isServerAdminAuthenticated));
 
-  // Login as Admin with Google sign-in simulation (Section 8)
-  const loginAsAdmin = ({ name = "Vedant Kokane", email = "vedantkokane94@gmail.com", department = "Technical Skill Development Hub", rollNo = "SVIT-ADMIN" } = {}) => {
-    const adminUser = {
-      uid: `svit-admin-${Date.now()}`,
-      name: "Vedant Kokane", // Name strictly verified as Vedant Kokane
-      email: email?.trim().toLowerCase() || "vedantkokane94@gmail.com",
-      prn: rollNo?.trim() || "SVIT-ADMIN",
+  // Set authenticated admin user state
+  const loginAsAdmin = (adminUser) => {
+    setIsServerAdminAuthenticated(true);
+    const u = {
+      uid: adminUser?.uid || `svit-admin-${Date.now()}`,
+      name: adminUser?.name || "Vedant Kokane",
+      email: adminUser?.email || "technicalteamsvit@gmail.com",
+      prn: adminUser?.rollNo || adminUser?.prn || "SVIT-ADMIN-LEAD",
       year: "Faculty / Lead Organizer",
-      branch: department?.trim() || "Technical Skill Development Hub",
+      branch: adminUser?.department || "Technical Skill Development Hub",
       track: "All Tracks",
       role: "admin",
-      provider: "google",
-      emailVerified: true
+      department: adminUser?.department || "Technical Skill Development Hub"
     };
-    setUser(adminUser);
-    localStorage.setItem('technova_active_user', JSON.stringify(adminUser));
-    return adminUser;
+    setUser(u);
+    localStorage.setItem('technova_active_user', JSON.stringify(u));
+    return u;
+  };
+
+  // Logout admin session from server and client
+  const logoutAdmin = async () => {
+    try {
+      await logoutAdminApi();
+    } catch (e) {}
+    setIsServerAdminAuthenticated(false);
+    setUser(null);
+    localStorage.removeItem('technova_active_user');
   };
 
   // Switch between Student and Admin
@@ -756,7 +879,10 @@ export const AppProvider = ({ children }) => {
     fullScreenExits = 0,
     proctoringFlagsCount = 0,
     quizDisqualified = false,
-    quizDisqualificationReason = ''
+    quizDisqualificationReason = '',
+    status = null,
+    exitReason = null,
+    exitedAt = null
   }) => {
     if (!user) return { success: false, message: "Please sign in first." };
     if (user.role === 'admin' || isAdmin) {
@@ -843,11 +969,13 @@ export const AppProvider = ({ children }) => {
       rawTotal: dayScoreObj.rawTotal,
       isCatchup,
       submittedAt: new Date().toISOString(),
-      status: "approved",
+      status: status || (prevSub?.status === 'exited' ? 'exited' : 'approved'),
+      exitReason: exitReason || prevSub?.exitReason || null,
+      exitedAt: exitedAt || prevSub?.exitedAt || (status === 'exited' ? new Date().toISOString() : null),
       vivaRequired: false,
       needsViva: false,
       failedViva: false,
-      vivaNotes: ""
+      vivaNotes: exitReason ? `Auto-Exit Triggered: ${exitReason}` : ""
     };
 
     let updatedList;
@@ -980,6 +1108,7 @@ export const AppProvider = ({ children }) => {
       isAdmin,
       isVedantAdmin,
       loginAsAdmin,
+      logoutAdmin,
       switchRole,
       tasks,
       updateTasks,
@@ -1046,7 +1175,14 @@ export const AppProvider = ({ children }) => {
       setSimulatedServerTime,
       getEffectiveServerTime,
       clearTestStudentData,
-      ADMIN_EMAILS
+      ADMIN_EMAILS,
+      examSettings,
+      updateExamSettings,
+      resultsPublished,
+      setResultsPublished,
+      toggleResultsPublished,
+      allowExitedStudentsForCert,
+      toggleAllowExitedForCert
     }}>
 
       {children}
