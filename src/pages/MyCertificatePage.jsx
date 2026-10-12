@@ -17,8 +17,17 @@ import {
 } from 'lucide-react';
 
 export const MyCertificatePage = ({ setCurrentTab }) => {
-  const { user, submissions = [], certificates = [], getStudentEligibility, manualOverrides } = useApp();
+  const { 
+    user, 
+    submissions = [], 
+    certificates = [], 
+    getStudentEligibility, 
+    manualOverrides,
+    resendRequests = {},
+    requestCertificateResend
+  } = useApp();
   const [copiedLink, setCopiedLink] = useState(false);
+  const [resendToast, setResendToast] = useState('');
 
   if (!user) {
     return (
@@ -121,6 +130,86 @@ export const MyCertificatePage = ({ setCurrentTab }) => {
                   <span>{copiedLink ? "Copied!" : "Copy Link"}</span>
                 </button>
               </div>
+            </div>
+
+            {/* Section 9.6: Email Delivery Status, Spam Advice & Request Resend */}
+            <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-[#181B20] border border-[#E8DEC8] dark:border-[#2E3440] shadow-xs space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[#E8DEC8]/50 dark:border-[#2E3440]">
+                <div className="flex items-center gap-2">
+                  <span className="p-1.5 rounded-lg bg-[#B3122B]/10 text-[#B3122B] dark:text-[#ff8a9e]">
+                    <FileCheck2 className="w-4 h-4" />
+                  </span>
+                  <div>
+                    <div className="font-bold text-xs text-[#1A1A1A] dark:text-white">
+                      Official Certificate Email Delivery
+                    </div>
+                    <div className="text-[11px] text-gray-500 mt-0.5">
+                      Sender: <strong className="text-[#8B0D20] dark:text-[#ff8a9e]">technicalteamsvit@gmail.com</strong>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Status indicator */}
+                <div className="flex items-center gap-2">
+                  {myCert.sentAt || myCert.emailStatus === 'sent' ? (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 font-bold text-[11px]">
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      <span>Certificate emailed on {myCert.sentAt || "October 2026"}</span>
+                    </span>
+                  ) : myCert.emailStatus === 'failed' ? (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-red-500/10 text-red-600 dark:text-red-400 font-bold text-[11px]">
+                      <AlertCircle className="w-3.5 h-3.5" />
+                      <span>Email delivery pending</span>
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-amber-500/10 text-amber-700 dark:text-amber-400 font-bold text-[11px]">
+                      <Clock className="w-3.5 h-3.5" />
+                      <span>Queued for email dispatch</span>
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Spam/Promotions advice note (Section 9.6) */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                <p className="text-gray-500 dark:text-gray-400 text-[11px] leading-relaxed">
+                  💡 <strong>Tip:</strong> If you don't see the email, check your <strong>Spam</strong> or <strong>Promotions</strong> folder, or download your verified certificate directly from this page using the button below.
+                </p>
+
+                {/* Request Resend Button (Section 9.6: Max 2 requests per student) */}
+                {(() => {
+                  const studentKey = user.uid || user.prn;
+                  const reqInfo = resendRequests[studentKey] || { count: 0 };
+                  const isMaxReached = reqInfo.count >= 2;
+
+                  return (
+                    <div className="shrink-0 flex items-center gap-2">
+                      <button
+                        onClick={() => {
+                          const res = requestCertificateResend(studentKey, "Student request from My Certificate portal");
+                          setResendToast(res.message);
+                          setTimeout(() => setResendToast(''), 4500);
+                        }}
+                        disabled={isMaxReached}
+                        className={`px-3 py-1.5 rounded-xl font-bold text-xs transition-all flex items-center gap-1.5 cursor-pointer ${
+                          isMaxReached
+                            ? 'bg-gray-100 dark:bg-gray-800 text-gray-400 cursor-not-allowed border border-gray-300 dark:border-gray-700'
+                            : 'bg-white dark:bg-[#181B20] text-gray-700 dark:text-gray-200 border border-[#E8DEC8] dark:border-[#2E3440] hover:text-[#B3122B] hover:border-[#B3122B]'
+                        }`}
+                        title={isMaxReached ? "Maximum 2 resend requests reached" : "Request faculty admin to resend email"}
+                      >
+                        <span>{isMaxReached ? "Resend Limit Reached (2/2)" : `Request Resend (${reqInfo.count}/2)`}</span>
+                      </button>
+                    </div>
+                  );
+                })()}
+              </div>
+
+              {resendToast && (
+                <div className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-800 dark:text-emerald-300 text-xs font-bold animate-in fade-in duration-200">
+                  {resendToast}
+                </div>
+              )}
             </div>
 
             <CertificateView

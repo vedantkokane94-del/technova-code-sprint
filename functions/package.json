@@ -1,0 +1,27 @@
+{
+  "name": "technova-functions",
+  "description": "Cloud Functions for Technova Code Sprint (SVIT Nashik)",
+  "scripts": {
+    "lint": "eslint .",
+    "serve": "firebase emulators:start --only functions",
+    "shell": "firebase functions:shell",
+    "start": "npm run shell",
+    "deploy": "firebase deploy --only functions",
+    "logs": "firebase functions:log"
+  },
+  "engines": {
+    "node": "18"
+  },
+  "main": "index.js",
+  "dependencies": {
+    "firebase-admin": "^12.0.0",
+    "firebase-functions": "^4.8.0",
+    "nodemailer": "^6.9.13",
+    "pdf-lib": "^1.17.1",
+    "qrcode": "^1.5.3"
+  },
+  "devDependencies": {
+    "eslint": "^8.57.0"
+  },
+  "private": true
+}

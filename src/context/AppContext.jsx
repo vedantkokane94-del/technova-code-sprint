@@ -182,6 +182,96 @@ export const AppProvider = ({ children }) => {
     });
   };
 
+  // Section 9.4: Daily send limit (default 400 for Gmail reliability)
+  const [dailySendLimit, setDailySendLimit] = useState(() => {
+    const saved = localStorage.getItem('technova_daily_send_limit');
+    return saved ? parseInt(saved, 10) : 400;
+  });
+
+  const updateDailySendLimit = (newLimit) => {
+    const val = Math.max(1, parseInt(newLimit, 10) || 400);
+    setDailySendLimit(val);
+    localStorage.setItem('technova_daily_send_limit', String(val));
+  };
+
+  // Section 9.4: Track daily sent count for Gmail quota
+  const getTodayDateKey = () => new Date().toISOString().slice(0, 10);
+
+  const [dailySentStats, setDailySentStats] = useState(() => {
+    const saved = localStorage.getItem('technova_daily_sent_stats');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (parsed.date === getTodayDateKey()) return parsed;
+      } catch (e) {}
+    }
+    return { date: getTodayDateKey(), count: 0 };
+  });
+
+  const incrementDailySentCount = (inc = 1) => {
+    setDailySentStats(prev => {
+      const today = getTodayDateKey();
+      const current = prev.date === today ? prev.count : 0;
+      const next = { date: today, count: current + inc };
+      localStorage.setItem('technova_daily_sent_stats', JSON.stringify(next));
+      return next;
+    });
+  };
+
+  // Section 9.6: Resend requests made by students (maximum 2 per student)
+  const [resendRequests, setResendRequests] = useState(() => {
+    const saved = localStorage.getItem('technova_resend_requests');
+    if (saved) {
+      try { return JSON.parse(saved); } catch (e) { return {}; }
+    }
+    return {};
+  });
+
+  const requestCertificateResend = (studentKey, reason = '') => {
+    const current = resendRequests[studentKey] || { count: 0, requests: [] };
+    if (current.count >= 2) {
+      return { success: false, message: "Maximum of 2 resend requests reached." };
+    }
+    const nextEntry = {
+      count: current.count + 1,
+      lastRequestedAt: new Date().toISOString(),
+      requests: [
+        ...current.requests,
+        { requestedAt: new Date().toISOString(), reason }
+      ]
+    };
+    const next = { ...resendRequests, [studentKey]: nextEntry };
+    setResendRequests(next);
+    localStorage.setItem('technova_resend_requests', JSON.stringify(next));
+    return { 
+      success: true, 
+      count: nextEntry.count, 
+      message: `Resend request submitted to faculty admin (${nextEntry.count} of 2 used).` 
+    };
+  };
+
+  // Section 9.5: Batch run audit logs (who started each run and when)
+  const [emailAuditRuns, setEmailAuditRuns] = useState(() => {
+    const saved = localStorage.getItem('technova_email_audit_runs');
+    if (saved) {
+      try { return JSON.parse(saved); } catch (e) { return []; }
+    }
+    return [];
+  });
+
+  const logEmailAuditRun = (runRecord) => {
+    setEmailAuditRuns(prev => {
+      const entry = {
+        id: `run-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        timestamp: new Date().toISOString(),
+        ...runRecord
+      };
+      const next = [entry, ...prev.slice(0, 99)];
+      localStorage.setItem('technova_email_audit_runs', JSON.stringify(next));
+      return next;
+    });
+  };
+
   // Combined directory of all students
   const getAllStudents = () => {
     const map = new Map();
@@ -452,6 +542,9 @@ export const AppProvider = ({ children }) => {
     localStorage.removeItem('technova_students');
     localStorage.removeItem('technova_proctoring_flags');
     localStorage.removeItem('technova_verification_logs');
+    localStorage.removeItem('technova_daily_sent_stats');
+    localStorage.removeItem('technova_resend_requests');
+    localStorage.removeItem('technova_email_audit_runs');
     localStorage.removeItem('technova_sprint_day');
     setUser(null);
     setSubmissions([]);
@@ -461,6 +554,9 @@ export const AppProvider = ({ children }) => {
     setStudents([]);
     setProctoringFlags([]);
     setVerificationLogs([]);
+    setDailySentStats({ date: getTodayDateKey(), count: 0 });
+    setResendRequests({});
+    setEmailAuditRuns([]);
     setCurrentDay(1);
   };
 
@@ -739,6 +835,14 @@ export const AppProvider = ({ children }) => {
       toggleManualOverride,
       emailLogs,
       addEmailLog,
+      dailySendLimit,
+      updateDailySendLimit,
+      dailySentStats,
+      incrementDailySentCount,
+      resendRequests,
+      requestCertificateResend,
+      emailAuditRuns,
+      logEmailAuditRun,
       ADMIN_EMAILS
     }}>
 

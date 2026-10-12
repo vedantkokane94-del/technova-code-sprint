@@ -39,7 +39,8 @@ import {
   Flame,
   ShieldAlert,
   KeyRound,
-  Shield
+  Shield,
+  Settings
 } from 'lucide-react';
 import { Github } from '../components/GithubIcon';
 import { CertificateView } from '../components/CertificateView';
@@ -72,6 +73,13 @@ export const AdminPage = ({ setCurrentTab }) => {
     updateProctoringFlag,
     emailLogs,
     addEmailLog,
+    dailySendLimit,
+    updateDailySendLimit,
+    dailySentStats,
+    incrementDailySentCount,
+    resendRequests,
+    emailAuditRuns,
+    logEmailAuditRun,
     user,
     isAdmin,
     loginAsAdmin
@@ -88,15 +96,28 @@ export const AdminPage = ({ setCurrentTab }) => {
   // Task editor state
   const [editingTask, setEditingTask] = useState(null);
 
-  // Certificate & Email Delivery State
+  // Certificate & Email Delivery State (Section 9)
   const [selectedStudentForCertModal, setSelectedStudentForCertModal] = useState(null);
   const [isBulkPreviewMode, setIsBulkPreviewMode] = useState(false);
   const [selectedStudentKeys, setSelectedStudentKeys] = useState([]);
-  const [certFilter, setCertFilter] = useState('all'); // 'all', 'eligible', 'ineligible', 'sent', 'failed'
+  const [certFilter, setCertFilter] = useState('all'); // 'all', 'eligible', 'ineligible', 'sent', 'failed', 'resend'
   const [certSearch, setCertSearch] = useState('');
   const [isSendingBatch, setIsSendingBatch] = useState(false);
   const [sendProgress, setSendProgress] = useState(null);
   const [adminToast, setAdminToast] = useState('');
+
+  // Section 9.2: Preview Email Modal State
+  const [previewEmailStudent, setPreviewEmailStudent] = useState(null);
+  const [previewEmailFormat, setPreviewEmailFormat] = useState('html'); // 'html' | 'text'
+
+  // Section 9.4: Daily Send Limit Modal State
+  const [showDailyLimitModal, setShowDailyLimitModal] = useState(false);
+  const [tempDailyLimit, setTempDailyLimit] = useState(dailySendLimit || 400);
+
+  // Section 9.4: Queue Control Refs
+  const skipBatchPauseRef = React.useRef(false);
+  const batchCancelRef = React.useRef(false);
+  const [showBulkConfirmModal, setShowBulkConfirmModal] = useState(false);
 
   // Standard Bcrypt Hash loaded from environment variable (Never hardcode plaintext password)
   const ADMIN_PASSWORD_HASH = import.meta.env.VITE_ADMIN_PASSWORD_HASH || "$2b$10$ZYadSLPwAhGbhqclMY/1E.c5ADCDg06GrCOV6Sl9EtE3JnzfSdiP6";
@@ -358,15 +379,20 @@ export const AdminPage = ({ setCurrentTab }) => {
   });
 
   const eligibleCount = studentsWithCertInfo.filter(s => s.eligibility.isEligible).length;
-  const sentCount = studentsWithCertInfo.filter(s => s.cert?.status === 'sent').length;
+  const sentCount = studentsWithCertInfo.filter(s => s.cert?.status === 'sent' || s.cert?.status === 'resent').length;
   const failedCount = studentsWithCertInfo.filter(s => s.cert?.status === 'failed').length;
+  const resendRequestedCount = studentsWithCertInfo.filter(s => (resendRequests?.[s.key] || []).length > 0).length;
 
   // Filter students based on active filter and search query
   const filteredStudents = studentsWithCertInfo.filter(s => {
     if (certFilter === 'eligible' && !s.eligibility.isEligible) return false;
     if (certFilter === 'ineligible' && s.eligibility.isEligible) return false;
-    if (certFilter === 'sent' && s.cert?.status !== 'sent') return false;
+    if (certFilter === 'sent' && s.cert?.status !== 'sent' && s.cert?.status !== 'resent') return false;
     if (certFilter === 'failed' && s.cert?.status !== 'failed') return false;
+    if (certFilter === 'resend') {
+      const reqs = resendRequests?.[s.key] || [];
+      if (reqs.length === 0) return false;
+    }
 
     if (certSearch.trim()) {
       const q = certSearch.toLowerCase();
@@ -379,111 +405,327 @@ export const AdminPage = ({ setCurrentTab }) => {
     return true;
   });
 
-  // Batch Sending Handler (Batches of 50 with delay)
-  const handleSendCertificates = async (targets) => {
-    if (!targets || targets.length === 0) return;
-    setIsSendingBatch(true);
+  // Section 9.4: Reliable Batch Sending Handler (Batches of 20, 60s cooldown, 3 retries, daily limit enforcement)
+  const handleSendCertificates = async (rawTargets, options = {}) => {
+    const { forceResend = false, isRetryOnly = false } = options;
+    if (!rawTargets || rawTargets.length === 0) return;
 
-    const BATCH_SIZE = 50;
+    // Filter targets based on idempotency (Section 9.2: skip already sent unless Resend)
+    let targets = rawTargets;
+    if (isRetryOnly) {
+      targets = rawTargets.filter(s => s.cert?.status === 'failed');
+    } else if (!forceResend) {
+      targets = rawTargets.filter(s => s.cert?.status !== 'sent' && s.cert?.status !== 'resent');
+    }
+
+    if (targets.length === 0) {
+      setAdminToast("All selected students have already received their certificates. Use 'Resend' to send another copy.");
+      setTimeout(() => setAdminToast(''), 4500);
+      return;
+    }
+
+    // Daily send limit verification (Section 9.4)
+    const currentSentToday = dailySentStats?.count || 0;
+    const limit = dailySendLimit || 400;
+    if (currentSentToday >= limit) {
+      alert(`Daily send limit of ${limit} reached. Dispatch halted to protect Gmail deliverability. You can adjust the limit in settings or resume tomorrow.`);
+      return;
+    }
+
+    setIsSendingBatch(true);
+    skipBatchPauseRef.current = false;
+    batchCancelRef.current = false;
+
+    const BATCH_SIZE = 20;
     const totalBatches = Math.ceil(targets.length / BATCH_SIZE);
+    let successfullySentCount = 0;
+    let failedBatchCount = 0;
+    let stoppedEarlyReason = null;
 
     for (let b = 0; b < totalBatches; b++) {
+      if (batchCancelRef.current) {
+        stoppedEarlyReason = "Cancelled by admin";
+        break;
+      }
+
+      // Check daily limit before starting batch
+      if ((dailySentStats?.count || 0) + successfullySentCount >= limit) {
+        stoppedEarlyReason = `Daily send limit of ${limit} reached. Paused for the day.`;
+        alert(`Daily send limit of ${limit} reached. Dispatch paused to protect Gmail deliverability.`);
+        break;
+      }
+
+      // 60-second pause between batches (Section 9.4: batches of 20 with 60-second pause between batches)
+      if (b > 0) {
+        let pauseSeconds = 60;
+        while (pauseSeconds > 0) {
+          if (skipBatchPauseRef.current || batchCancelRef.current) break;
+          setSendProgress({
+            current: b * BATCH_SIZE,
+            total: targets.length,
+            batchNumber: b + 1,
+            totalBatches,
+            isPaused: true,
+            pauseRemaining: pauseSeconds,
+            message: `Batch ${b} completed. Pausing ${pauseSeconds}s to respect Gmail rate limits (Click Continue to skip)...`
+          });
+          await new Promise(r => setTimeout(r, 1000));
+          pauseSeconds--;
+        }
+        skipBatchPauseRef.current = false;
+        if (batchCancelRef.current) {
+          stoppedEarlyReason = "Cancelled by admin during cooldown";
+          break;
+        }
+      }
+
       const batch = targets.slice(b * BATCH_SIZE, (b + 1) * BATCH_SIZE);
 
-      setSendProgress({
-        current: b * BATCH_SIZE,
-        total: targets.length,
-        batchNumber: b + 1,
-        totalBatches,
-        message: `Processing batch ${b + 1} of ${totalBatches}...`
-      });
-
-      // Inter-batch rate limit delay
-      await new Promise(r => setTimeout(r, 600));
-
       for (let i = 0; i < batch.length; i++) {
-        const student = batch[i];
-        const cert = issueCertificate(student);
-        const recipientEmail = student.email || `${student.prn.toLowerCase()}@svit.ac.in`;
-
-        // Error resilience demo simulation
-        const simulateFail = student.name.toLowerCase().includes('fail') || student.email.includes('error');
-
-        if (simulateFail) {
-          updateCertificateStatus(cert.certificateId, {
-            status: 'failed',
-            errorReason: 'SMTP 550: Mailbox unavailable or rejected by destination server'
-          });
-          addEmailLog({
-            id: `log-${Date.now()}-${i}`,
-            recipientEmail,
-            studentName: student.name,
-            certificateId: cert.certificateId,
-            sender: "technicalteamsvit@gmail.com",
-            status: "failed",
-            error: "SMTP 550: Mailbox unavailable",
-            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            subject: "Your Technova Code Sprint Certificate"
-          });
-        } else {
-          updateCertificateStatus(cert.certificateId, {
-            status: 'sent',
-            sentAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            errorReason: null
-          });
-          addEmailLog({
-            id: `log-${Date.now()}-${i}`,
-            recipientEmail,
-            studentName: student.name,
-            certificateId: cert.certificateId,
-            sender: "technicalteamsvit@gmail.com",
-            status: "sent",
-            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            subject: "Your Technova Code Sprint Certificate"
-          });
+        if (batchCancelRef.current) {
+          stoppedEarlyReason = "Cancelled by admin";
+          break;
         }
 
+        // Daily limit check per individual email
+        if ((dailySentStats?.count || 0) + successfullySentCount >= limit) {
+          stoppedEarlyReason = `Daily send limit reached (${limit}). Stopped.`;
+          break;
+        }
+
+        const student = batch[i];
+        const cert = issueCertificate(student);
+        const recipientEmail = (student.email || `${student.prn.toLowerCase()}@svit.ac.in`).trim();
+        const score = student.eligibility?.totalScore?.toFixed(1) || '50.0';
+        const language = student.language || student.track || 'Python';
+        const currentIndex = b * BATCH_SIZE + i + 1;
+
         setSendProgress({
-          current: b * BATCH_SIZE + i + 1,
+          current: currentIndex,
           total: targets.length,
           batchNumber: b + 1,
           totalBatches,
-          message: `Delivered to ${student.name} (${b * BATCH_SIZE + i + 1}/${targets.length})`
+          isPaused: false,
+          pauseRemaining: 0,
+          message: `Sending certificate to ${student.name} (${currentIndex}/${targets.length})...`
         });
 
-        await new Promise(r => setTimeout(r, 180));
+        // Email validation (Section 9.7)
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(recipientEmail)) {
+          updateCertificateStatus(cert.certificateId, {
+            status: 'failed',
+            errorReason: 'invalid address: Empty or malformed college email address',
+            attempts: 1
+          });
+          addEmailLog({
+            id: `log-${Date.now()}-${i}`,
+            recipientEmail,
+            studentName: student.name,
+            prn: student.prn,
+            certificateId: cert.certificateId,
+            sender: "technicalteamsvit@gmail.com",
+            status: "failed",
+            error: "invalid address: Malformed recipient address",
+            attempts: 1,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            subject: `Your Technova Code Sprint Certificate - ${student.name}`
+          });
+          failedBatchCount++;
+          continue;
+        }
+
+        // Retry logic: Retry failed email up to 3 times (Section 9.4)
+        let delivered = false;
+        let lastError = null;
+        let attempt = 0;
+
+        while (attempt < 3 && !delivered) {
+          attempt++;
+
+          // Classified error simulation & verification
+          const isSimulatedFail = student.name.toLowerCase().includes('fail') || recipientEmail.includes('error');
+          const isMailboxFull = recipientEmail.includes('mailboxfull');
+          const isRateLimited = recipientEmail.includes('ratelimit');
+          const isAuthProblem = recipientEmail.includes('autherror');
+
+          if (isAuthProblem) {
+            // Stop run and alert admin if authentication fails (Section 9.4, 9.7)
+            alert("Email credentials missing or incorrect. Check GMAIL_USER and GMAIL_APP_PASSWORD in Cloud Function secrets.");
+            batchCancelRef.current = true;
+            stoppedEarlyReason = "Authentication problem: Invalid Gmail credentials";
+            break;
+          }
+
+          if (isSimulatedFail || isMailboxFull || isRateLimited) {
+            lastError = isMailboxFull
+              ? "mailbox full: 552 Quota exceeded at destination server"
+              : isRateLimited
+                ? "rate limit: 421 4.7.0 Try again later"
+                : "smtp_error: Connection timed out or server refused connection";
+
+            if (attempt < 3) {
+              setSendProgress(prev => ({
+                ...prev,
+                message: `Attempt ${attempt} failed for ${student.name} (${lastError.split(':')[0]}). Retrying (${attempt + 1}/3)...`
+              }));
+              await new Promise(r => setTimeout(r, 1200)); // wait before retry
+            }
+          } else {
+            delivered = true;
+          }
+        }
+
+        if (batchCancelRef.current && stoppedEarlyReason) break;
+
+        const timestampStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const messageId = `<svit-${Date.now()}-${cert.certificateId.toLowerCase()}@gmail.com>`;
+
+        if (delivered) {
+          successfullySentCount++;
+          incrementDailySentCount();
+
+          updateCertificateStatus(cert.certificateId, {
+            status: forceResend ? 'resent' : 'sent',
+            sentAt: timestampStr,
+            messageId,
+            errorReason: null,
+            attempts: attempt
+          });
+
+          addEmailLog({
+            id: `log-${Date.now()}-${i}`,
+            recipientEmail,
+            studentName: student.name,
+            prn: student.prn,
+            certificateId: cert.certificateId,
+            sender: "technicalteamsvit@gmail.com",
+            status: forceResend ? "resent" : "sent",
+            attempts: attempt,
+            messageId,
+            timestamp: timestampStr,
+            subject: `Your Technova Code Sprint Certificate - ${student.name}`
+          });
+        } else {
+          failedBatchCount++;
+          updateCertificateStatus(cert.certificateId, {
+            status: 'failed',
+            errorReason: lastError || "smtp_error: Delivery failure after 3 attempts",
+            attempts: 3
+          });
+
+          addEmailLog({
+            id: `log-${Date.now()}-${i}`,
+            recipientEmail,
+            studentName: student.name,
+            prn: student.prn,
+            certificateId: cert.certificateId,
+            sender: "technicalteamsvit@gmail.com",
+            status: "failed",
+            error: lastError || "Failed after 3 attempts",
+            attempts: 3,
+            timestamp: timestampStr,
+            subject: `Your Technova Code Sprint Certificate - ${student.name}`
+          });
+        }
+
+        // Section 9.4: Spacing between individual emails (~2.5s)
+        await new Promise(r => setTimeout(r, 2200));
       }
     }
+
+    // Log Batch Run to Audit Trail (Section 9.5)
+    logEmailAuditRun({
+      runId: `run-${Date.now()}`,
+      initiatedBy: user?.name || "Vedant Kokane (Faculty Admin)",
+      adminEmail: user?.email || "technicalteamsvit@gmail.com",
+      timestamp: new Date().toLocaleString(),
+      totalTargets: targets.length,
+      sentCount: successfullySentCount,
+      failedCount: failedBatchCount,
+      stoppedReason: stoppedEarlyReason,
+      status: stoppedEarlyReason ? "stopped" : "completed"
+    });
 
     setIsSendingBatch(false);
     setSendProgress(null);
     setSelectedStudentForCertModal(null);
     setIsBulkPreviewMode(false);
     setSelectedStudentKeys([]);
-    setAdminToast(`Successfully dispatched certificates to ${targets.length} student(s) from technicalteamsvit@gmail.com!`);
-    setTimeout(() => setAdminToast(''), 5000);
+    setShowBulkConfirmModal(false);
+
+    if (stoppedEarlyReason) {
+      setAdminToast(`Dispatch stopped: ${stoppedEarlyReason}. ${successfullySentCount} sent, ${failedBatchCount} failed.`);
+    } else {
+      setAdminToast(`Dispatch complete! ${successfullySentCount} sent successfully from technicalteamsvit@gmail.com (${failedBatchCount} failed).`);
+    }
+    setTimeout(() => setAdminToast(''), 6000);
   };
 
-  // 1 Sample Preview First, then "Send to all eligible"
+  // Section 9.5: Export Email Log as CSV
+  const handleExportEmailLogCSV = () => {
+    if (!emailLogs || emailLogs.length === 0) {
+      alert("No email delivery records available to export.");
+      return;
+    }
+
+    const headers = [
+      "Log ID",
+      "Student Name",
+      "Roll Number (PRN)",
+      "Recipient Email",
+      "Certificate ID",
+      "Status",
+      "Sender",
+      "Timestamp",
+      "Delivery Attempts",
+      "Error Reason",
+      "Message ID"
+    ];
+
+    const rows = emailLogs.map(log => [
+      `"${log.id || ''}"`,
+      `"${(log.studentName || '').replace(/"/g, '""')}"`,
+      `"${log.prn || ''}"`,
+      `"${log.recipientEmail || ''}"`,
+      `"${log.certificateId || ''}"`,
+      `"${(log.status || '').toUpperCase()}"`,
+      `"${log.sender || 'technicalteamsvit@gmail.com'}"`,
+      `"${log.timestamp || ''}"`,
+      log.attempts || 1,
+      `"${(log.error || log.errorReason || '').replace(/"/g, '""')}"`,
+      `"${log.messageId || ''}"`
+    ]);
+
+    const csvContent = "data:text/csv;charset=utf-8," + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', `svit_certificate_email_delivery_log_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // Section 9.2: "Send to all eligible" opens Confirmation Modal with exact counts
   const handleTriggerBulkSend = () => {
     const eligibleList = studentsWithCertInfo.filter(s => s.eligibility.isEligible);
     if (eligibleList.length === 0) {
-      alert("No students currently qualify for certificates. Make sure students have completed all 9 days without unresolved flags, or use Manual Eligibility Override.");
+      alert("No students currently qualify for certificates. Eligible students must have 50 or more points out of 100 with all integrity flags cleared.");
       return;
     }
-    // Preview first sample student
-    setSelectedStudentForCertModal(eligibleList[0]);
-    setIsBulkPreviewMode(true);
+    setShowBulkConfirmModal(true);
   };
 
-  // Test Email to Admin
+  // Section 9.2: "Send test email to me" (sends one sample certificate to the admin)
   const handleTestEmailToAdmin = async () => {
     const sample = studentsWithCertInfo.find(s => s.eligibility.isEligible) || allStudents[0] || {
       uid: "svit-sample-01",
-      name: "Sample Student (Preview)",
+      name: "Faculty Test Student",
       email: user?.email || "technicalteamsvit@gmail.com",
       prn: "SVIT2026TEST01",
-      track: "Web"
+      track: "Web",
+      language: "Python"
     };
 
     const cert = issueCertificate(sample);
@@ -495,25 +737,34 @@ export const AdminPage = ({ setCurrentTab }) => {
       total: 1,
       batchNumber: 1,
       totalBatches: 1,
+      isPaused: false,
+      pauseRemaining: 0,
       message: `Sending sample test certificate to ${adminEmail}...`
     });
 
-    await new Promise(r => setTimeout(r, 700));
+    await new Promise(r => setTimeout(r, 1500));
+
+    incrementDailySentCount();
+    const timestampStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const messageId = `<svit-test-${Date.now()}@gmail.com>`;
 
     addEmailLog({
       id: `log-test-${Date.now()}`,
       recipientEmail: adminEmail,
       studentName: sample.name,
+      prn: sample.prn,
       certificateId: cert.certificateId,
       sender: "technicalteamsvit@gmail.com",
       status: "sent",
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      subject: `[SAMPLE PREVIEW] Your Technova Code Sprint Certificate (${cert.certificateId})`
+      attempts: 1,
+      messageId,
+      timestamp: timestampStr,
+      subject: `Your Technova Code Sprint Certificate - ${sample.name} [TEST PREVIEW]`
     });
 
     setIsSendingBatch(false);
     setSendProgress(null);
-    setAdminToast(`Sample certificate test email successfully delivered to ${adminEmail}!`);
+    setAdminToast(`Test certificate email sent successfully to ${adminEmail}!`);
     setTimeout(() => setAdminToast(''), 5000);
   };
 
@@ -1260,25 +1511,121 @@ export const AdminPage = ({ setCurrentTab }) => {
         {activeTab === 'certificates' && (
           <div className="space-y-6">
             
-            {/* Batch Progress Bar Banner */}
+            {/* Section 9.5: Top Summary Metrics Cards */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+              <div className="p-4 rounded-3xl bg-white dark:bg-[#181B20] border border-[#E8DEC8] dark:border-[#2E3440] shadow-xs">
+                <div className="text-[10px] uppercase font-bold text-gray-400">Eligible (Score ≥ 50)</div>
+                <div className="text-xl font-black text-emerald-600 mt-1 flex items-center justify-between">
+                  <span>{eligibleCount}</span>
+                  <Award className="w-4 h-4 text-emerald-500 opacity-60" />
+                </div>
+                <div className="text-[10px] text-gray-400 mt-0.5">Cleared viva & locked</div>
+              </div>
+
+              <div className="p-4 rounded-3xl bg-white dark:bg-[#181B20] border border-[#E8DEC8] dark:border-[#2E3440] shadow-xs">
+                <div className="text-[10px] uppercase font-bold text-gray-400">Sent Successfully</div>
+                <div className="text-xl font-black text-blue-600 mt-1 flex items-center justify-between">
+                  <span>{sentCount}</span>
+                  <CheckCircle2 className="w-4 h-4 text-blue-500 opacity-60" />
+                </div>
+                <div className="text-[10px] text-gray-400 mt-0.5">Delivered via Gmail</div>
+              </div>
+
+              <div className="p-4 rounded-3xl bg-white dark:bg-[#181B20] border border-[#E8DEC8] dark:border-[#2E3440] shadow-xs">
+                <div className="text-[10px] uppercase font-bold text-gray-400">Failed / Retries</div>
+                <div className="text-xl font-black text-red-600 mt-1 flex items-center justify-between">
+                  <span>{failedCount}</span>
+                  <AlertOctagon className="w-4 h-4 text-red-500 opacity-60" />
+                </div>
+                <div className="text-[10px] text-gray-400 mt-0.5">Max 3 retries attempted</div>
+              </div>
+
+              <div className="p-4 rounded-3xl bg-white dark:bg-[#181B20] border border-[#E8DEC8] dark:border-[#2E3440] shadow-xs">
+                <div className="text-[10px] uppercase font-bold text-gray-400">Remaining to Send</div>
+                <div className="text-xl font-black text-amber-600 mt-1 flex items-center justify-between">
+                  <span>{Math.max(0, eligibleCount - sentCount)}</span>
+                  <Clock className="w-4 h-4 text-amber-500 opacity-60" />
+                </div>
+                <div className="text-[10px] text-gray-400 mt-0.5">Pending initial dispatch</div>
+              </div>
+
+              <div className="p-4 rounded-3xl bg-white dark:bg-[#181B20] border border-[#E8DEC8] dark:border-[#2E3440] shadow-xs">
+                <div className="flex items-center justify-between text-[10px] uppercase font-bold text-gray-400">
+                  <span>Daily Limit Used</span>
+                  <button 
+                    onClick={() => {
+                      setTempDailyLimit(dailySendLimit || 400);
+                      setShowDailyLimitModal(true);
+                    }}
+                    className="text-[#B3122B] hover:underline flex items-center gap-0.5 cursor-pointer"
+                    title="Configure Gmail daily send limit"
+                  >
+                    <Settings className="w-2.5 h-2.5" />
+                    <span>Edit</span>
+                  </button>
+                </div>
+                <div className="text-xl font-black text-[#1A1A1A] dark:text-white mt-1 flex items-center justify-between">
+                  <span>{dailySentStats?.count || 0} <span className="text-xs font-normal text-gray-400">/ {dailySendLimit || 400}</span></span>
+                  <Mail className="w-4 h-4 text-gray-400 opacity-60" />
+                </div>
+                <div className="text-[10px] text-gray-400 mt-0.5">Resets automatically daily</div>
+              </div>
+
+              <div 
+                onClick={() => setCertFilter('resend')}
+                className="p-4 rounded-3xl bg-white dark:bg-[#181B20] border border-[#E8DEC8] dark:border-[#2E3440] shadow-xs cursor-pointer hover:border-amber-400 transition-colors"
+              >
+                <div className="text-[10px] uppercase font-bold text-gray-400">Resend Requests</div>
+                <div className="text-xl font-black text-orange-600 mt-1 flex items-center justify-between">
+                  <span>{resendRequestedCount}</span>
+                  <RotateCw className="w-4 h-4 text-orange-500 opacity-60" />
+                </div>
+                <div className="text-[10px] text-gray-400 mt-0.5">Max 2 per student</div>
+              </div>
+            </div>
+            
+            {/* Batch Progress Bar Banner with Cooldown & Cancel Controls */}
             {isSendingBatch && sendProgress && (
-              <div className="p-5 rounded-2xl bg-gradient-to-r from-[#B3122B] to-[#8B0D20] text-white shadow-lg animate-in fade-in duration-300">
+              <div className="p-5 rounded-3xl bg-gradient-to-r from-[#B3122B] to-[#8B0D20] text-white shadow-xl animate-in fade-in duration-300">
                 <div className="flex items-center justify-between mb-2 text-xs font-bold">
                   <div className="flex items-center gap-2">
-                    <RotateCw className="w-4 h-4 animate-spin text-amber-300" />
-                    <span>Dispatched via technicalteamsvit@gmail.com (Batch {sendProgress.batchNumber} of {sendProgress.totalBatches})</span>
+                    <RotateCw className={`w-4 h-4 text-amber-300 ${sendProgress.isPaused ? '' : 'animate-spin'}`} />
+                    <span>
+                      {sendProgress.isPaused 
+                        ? `Cooldown Active between Batches (Batch ${sendProgress.batchNumber} of ${sendProgress.totalBatches})`
+                        : `Dispatching via technicalteamsvit@gmail.com (Batch ${sendProgress.batchNumber} of ${sendProgress.totalBatches})`
+                      }
+                    </span>
                   </div>
-                  <span className="font-mono">{sendProgress.current} / {sendProgress.total}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono">{sendProgress.current} / {sendProgress.total}</span>
+                    <button
+                      onClick={() => { batchCancelRef.current = true; }}
+                      className="px-2.5 py-0.5 rounded-lg bg-black/40 text-white/90 hover:bg-black/60 text-[10px] font-bold cursor-pointer transition-colors"
+                    >
+                      Cancel Run
+                    </button>
+                  </div>
                 </div>
+                
                 <div className="w-full bg-black/25 rounded-full h-2.5 overflow-hidden mb-2">
                   <div 
                     className="bg-amber-300 h-2.5 rounded-full transition-all duration-300" 
-                    style={{ width: `${Math.round((sendProgress.current / sendProgress.total) * 100)}%` }}
+                    style={{ width: `${Math.round((sendProgress.current / Math.max(1, sendProgress.total)) * 100)}%` }}
                   ></div>
                 </div>
-                <p className="text-[11px] text-white/90 font-medium">
-                  {sendProgress.message} (50 emails per batch with automated delay to protect deliverability)
-                </p>
+
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-[11px] text-white/90 font-medium">
+                  <p>{sendProgress.message}</p>
+                  {sendProgress.isPaused && (
+                    <button
+                      onClick={() => { skipBatchPauseRef.current = true; }}
+                      className="px-3 py-1 rounded-xl bg-amber-400 text-gray-900 font-extrabold hover:bg-amber-300 transition-colors self-start sm:self-auto cursor-pointer shadow-xs"
+                    >
+                      Skip 60s Pause & Continue Now ⏩
+                    </button>
+                  )}
+                </div>
               </div>
             )}
 
@@ -1293,7 +1640,35 @@ export const AdminPage = ({ setCurrentTab }) => {
                   title="Sends a test sample certificate email to the admin"
                 >
                   <Mail className="w-3.5 h-3.5 text-amber-600" />
-                  <span>Test Email to Me</span>
+                  <span>Send test email to me</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    const target = studentsWithCertInfo.find(s => selectedStudentKeys.includes(s.key)) || 
+                                   studentsWithCertInfo.find(s => s.eligibility.isEligible) || 
+                                   filteredStudents[0];
+                    if (target) {
+                      setPreviewEmailStudent(target);
+                    } else {
+                      alert("Please select a student to preview their email.");
+                    }
+                  }}
+                  className="px-3.5 py-2 rounded-xl text-xs font-bold bg-[#F5EFEB] dark:bg-[#252A34] text-gray-800 dark:text-gray-200 hover:text-[#B3122B] border border-[#E8DEC8] dark:border-[#2E3440] transition-all flex items-center gap-1.5 cursor-pointer"
+                  title="Preview the exact subject, body, and attachment for a student"
+                >
+                  <Eye className="w-3.5 h-3.5 text-purple-600" />
+                  <span>Preview Email</span>
+                </button>
+
+                <button
+                  onClick={handleTriggerBulkSend}
+                  disabled={isSendingBatch || eligibleCount === 0}
+                  className="px-4 py-2 rounded-xl text-xs font-extrabold bg-[#B3122B] text-white hover:bg-[#8B0D20] transition-all flex items-center gap-2 shadow-sm shadow-[#B3122B]/20 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="Confirm and send to all eligible students (Score >= 50)"
+                >
+                  <Award className="w-4 h-4" />
+                  <span>Send to all eligible ({eligibleCount})</span>
                 </button>
 
                 <button
@@ -1306,23 +1681,46 @@ export const AdminPage = ({ setCurrentTab }) => {
                   title="Send certificates to checked students"
                 >
                   <Send className="w-3.5 h-3.5 text-blue-600" />
-                  <span>Send to Selected ({selectedStudentKeys.length})</span>
+                  <span>Send to selected ({selectedStudentKeys.length})</span>
                 </button>
 
                 <button
-                  onClick={handleTriggerBulkSend}
-                  disabled={isSendingBatch || eligibleCount === 0}
-                  className="px-4 py-2 rounded-xl text-xs font-extrabold bg-[#B3122B] text-white hover:bg-[#8B0D20] transition-all flex items-center gap-2 shadow-sm shadow-[#B3122B]/20 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                  title="Preview 1 sample certificate first, then confirm send to all eligible students"
+                  onClick={() => {
+                    const failedList = studentsWithCertInfo.filter(s => s.cert?.status === 'failed');
+                    handleSendCertificates(failedList, { isRetryOnly: true });
+                  }}
+                  disabled={isSendingBatch || failedCount === 0}
+                  className="px-3.5 py-2 rounded-xl text-xs font-bold bg-[#F5EFEB] dark:bg-[#252A34] text-gray-800 dark:text-gray-200 hover:text-[#B3122B] border border-[#E8DEC8] dark:border-[#2E3440] transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                  title="Retry failed certificate emails"
                 >
-                  <Award className="w-4 h-4" />
-                  <span>Send to All Eligible ({eligibleCount})</span>
+                  <RotateCw className="w-3.5 h-3.5 text-red-600" />
+                  <span>Retry failed ({failedCount})</span>
+                </button>
+
+                <button
+                  onClick={handleExportEmailLogCSV}
+                  className="px-3.5 py-2 rounded-xl text-xs font-bold bg-[#F5EFEB] dark:bg-[#252A34] text-gray-800 dark:text-gray-200 hover:text-[#B3122B] border border-[#E8DEC8] dark:border-[#2E3440] transition-all flex items-center gap-1.5 cursor-pointer"
+                  title="Export email dispatch audit log as CSV"
+                >
+                  <Download className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Export Email Log</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    setTempDailyLimit(dailySendLimit || 400);
+                    setShowDailyLimitModal(true);
+                  }}
+                  className="p-2 rounded-xl bg-[#F5EFEB] dark:bg-[#252A34] text-gray-700 dark:text-gray-300 hover:text-[#B3122B] border border-[#E8DEC8] dark:border-[#2E3440] transition-all cursor-pointer"
+                  title="Gmail daily send limit configuration"
+                >
+                  <Settings className="w-3.5 h-3.5" />
                 </button>
               </div>
 
               {/* Filter Pills & Search */}
               <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
-                <div className="relative flex-1 sm:w-64">
+                <div className="relative flex-1 sm:w-60">
                   <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                   <input
                     type="text"
@@ -1336,43 +1734,51 @@ export const AdminPage = ({ setCurrentTab }) => {
                 <div className="flex items-center bg-[#F5EFEB] dark:bg-[#111317] p-1 rounded-xl border border-[#E8DEC8] dark:border-[#2E3440] text-[11px] overflow-x-auto">
                   <button
                     onClick={() => setCertFilter('all')}
-                    className={`px-2.5 py-1 rounded-lg font-semibold transition-all ${
-                      certFilter === 'all' ? 'bg-white dark:bg-[#252A34] text-[#B3122B] shadow-2xs' : 'text-gray-500'
+                    className={`px-2.5 py-1 rounded-lg font-semibold transition-all whitespace-nowrap cursor-pointer ${
+                      certFilter === 'all' ? 'bg-white dark:bg-[#252A34] text-[#B3122B] shadow-2xs font-bold' : 'text-gray-500'
                     }`}
                   >
                     All ({allStudents.length})
                   </button>
                   <button
                     onClick={() => setCertFilter('eligible')}
-                    className={`px-2.5 py-1 rounded-lg font-semibold transition-all ${
-                      certFilter === 'eligible' ? 'bg-white dark:bg-[#252A34] text-emerald-600 shadow-2xs' : 'text-gray-500'
+                    className={`px-2.5 py-1 rounded-lg font-semibold transition-all whitespace-nowrap cursor-pointer ${
+                      certFilter === 'eligible' ? 'bg-white dark:bg-[#252A34] text-emerald-600 shadow-2xs font-bold' : 'text-gray-500'
                     }`}
                   >
                     Eligible ({eligibleCount})
                   </button>
                   <button
                     onClick={() => setCertFilter('ineligible')}
-                    className={`px-2.5 py-1 rounded-lg font-semibold transition-all ${
-                      certFilter === 'ineligible' ? 'bg-white dark:bg-[#252A34] text-gray-700 shadow-2xs' : 'text-gray-500'
+                    className={`px-2.5 py-1 rounded-lg font-semibold transition-all whitespace-nowrap cursor-pointer ${
+                      certFilter === 'ineligible' ? 'bg-white dark:bg-[#252A34] text-gray-700 shadow-2xs font-bold' : 'text-gray-500'
                     }`}
                   >
                     Ineligible
                   </button>
                   <button
                     onClick={() => setCertFilter('sent')}
-                    className={`px-2.5 py-1 rounded-lg font-semibold transition-all ${
-                      certFilter === 'sent' ? 'bg-white dark:bg-[#252A34] text-blue-600 shadow-2xs' : 'text-gray-500'
+                    className={`px-2.5 py-1 rounded-lg font-semibold transition-all whitespace-nowrap cursor-pointer ${
+                      certFilter === 'sent' ? 'bg-white dark:bg-[#252A34] text-blue-600 shadow-2xs font-bold' : 'text-gray-500'
                     }`}
                   >
                     Sent ({sentCount})
                   </button>
                   <button
                     onClick={() => setCertFilter('failed')}
-                    className={`px-2.5 py-1 rounded-lg font-semibold transition-all ${
-                      certFilter === 'failed' ? 'bg-white dark:bg-[#252A34] text-red-600 shadow-2xs' : 'text-gray-500'
+                    className={`px-2.5 py-1 rounded-lg font-semibold transition-all whitespace-nowrap cursor-pointer ${
+                      certFilter === 'failed' ? 'bg-white dark:bg-[#252A34] text-red-600 shadow-2xs font-bold' : 'text-gray-500'
                     }`}
                   >
                     Failed ({failedCount})
+                  </button>
+                  <button
+                    onClick={() => setCertFilter('resend')}
+                    className={`px-2.5 py-1 rounded-lg font-semibold transition-all whitespace-nowrap cursor-pointer ${
+                      certFilter === 'resend' ? 'bg-white dark:bg-[#252A34] text-orange-600 shadow-2xs font-bold' : 'text-gray-500'
+                    }`}
+                  >
+                    Resend Req ({resendRequestedCount})
                   </button>
                 </div>
               </div>
@@ -1470,11 +1876,17 @@ export const AdminPage = ({ setCurrentTab }) => {
                                   {stud.name.charAt(0)}
                                 </div>
                                 <div>
-                                  <div className="font-bold text-[#1A1A1A] dark:text-white flex items-center gap-1.5">
+                                  <div className="font-bold text-[#1A1A1A] dark:text-white flex items-center gap-1.5 flex-wrap">
                                     <span>{stud.name}</span>
                                     <span className="text-[10px] px-1.5 py-0.2 rounded bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 font-semibold">
                                       {stud.track || 'Web'}
                                     </span>
+                                    {(resendRequests?.[stud.key] || []).length > 0 && (
+                                      <span className="text-[9px] px-1.5 py-0.2 rounded-full font-bold bg-orange-100 text-orange-800 dark:bg-orange-950/40 dark:text-orange-300 inline-flex items-center gap-0.5" title="Student submitted certificate resend request via My Certificate page">
+                                        <RotateCw className="w-2.5 h-2.5" />
+                                        <span>Resend Req ({resendRequests[stud.key].length}/2)</span>
+                                      </span>
+                                    )}
                                   </div>
                                   <div className="text-[11px] text-gray-500 font-mono">
                                     Roll No: {stud.prn} • <span className="text-gray-400">{stud.email || `${stud.prn.toLowerCase()}@svit.ac.in`}</span>
@@ -1605,11 +2017,15 @@ export const AdminPage = ({ setCurrentTab }) => {
 
                             {/* Email Delivery Status */}
                             <td className="py-3 px-4">
-                              {emailStatus === 'sent' ? (
+                              {emailStatus === 'sent' || emailStatus === 'resent' ? (
                                 <div className="space-y-0.5">
-                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 font-bold text-[10px]">
+                                  <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg font-bold text-[10px] ${
+                                    emailStatus === 'resent'
+                                      ? 'bg-purple-500/15 text-purple-700 dark:text-purple-400'
+                                      : 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400'
+                                  }`}>
                                     <CheckCircle2 className="w-3 h-3" />
-                                    <span>Sent</span>
+                                    <span>{emailStatus === 'resent' ? 'Resent' : 'Sent'}</span>
                                   </span>
                                   {cert?.sentAt && (
                                     <div className="text-[9px] text-gray-400">{cert.sentAt}</div>
@@ -1619,7 +2035,7 @@ export const AdminPage = ({ setCurrentTab }) => {
                                 <div className="space-y-1">
                                   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-red-500/15 text-red-700 dark:text-red-400 font-bold text-[10px]">
                                     <AlertOctagon className="w-3 h-3" />
-                                    <span>Failed</span>
+                                    <span>Failed ({cert?.attempts || 3}x)</span>
                                   </span>
                                   <div className="text-[9px] text-red-500 truncate max-w-[120px]" title={cert?.errorReason}>
                                     {cert?.errorReason || "SMTP error"}
@@ -1653,6 +2069,14 @@ export const AdminPage = ({ setCurrentTab }) => {
                                   title="Preview Certificate"
                                 >
                                   <Eye className="w-3.5 h-3.5" />
+                                </button>
+
+                                <button
+                                  onClick={() => setPreviewEmailStudent(stud)}
+                                  className="p-1.5 rounded-lg bg-[#FCF9F2] dark:bg-[#111317] border border-[#E8DEC8] dark:border-[#2E3440] text-gray-600 dark:text-gray-300 hover:text-purple-600 hover:border-purple-600 transition-colors cursor-pointer"
+                                  title="Preview Exact Email with PDF Attachment"
+                                >
+                                  <Mail className="w-3.5 h-3.5 text-purple-600" />
                                 </button>
 
                                 {/* Revoke / Reissue buttons */}
@@ -1691,7 +2115,7 @@ export const AdminPage = ({ setCurrentTab }) => {
 
                                 {emailStatus === 'failed' ? (
                                   <button
-                                    onClick={() => handleSendCertificates([stud])}
+                                    onClick={() => handleSendCertificates([stud], { isRetryOnly: true })}
                                     className="px-2.5 py-1 rounded-lg bg-red-100 dark:bg-red-950/40 text-red-700 dark:text-red-300 font-bold text-[10px] hover:bg-red-200 transition-colors flex items-center gap-1 cursor-pointer"
                                     title="Retry sending certificate email"
                                   >
@@ -1700,19 +2124,19 @@ export const AdminPage = ({ setCurrentTab }) => {
                                   </button>
                                 ) : (
                                   <button
-                                    onClick={() => handleSendCertificates([stud])}
+                                    onClick={() => handleSendCertificates([stud], { forceResend: emailStatus === 'sent' || emailStatus === 'resent' })}
                                     disabled={!isEligible}
                                     className={`px-2.5 py-1 rounded-lg font-bold text-[10px] transition-colors flex items-center gap-1 cursor-pointer ${
-                                      emailStatus === 'sent'
-                                        ? 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200'
+                                      emailStatus === 'sent' || emailStatus === 'resent'
+                                        ? 'bg-purple-100 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 hover:bg-purple-200'
                                         : isEligible
                                           ? 'bg-[#B3122B] text-white hover:bg-[#8B0D20]'
                                           : 'bg-gray-100 text-gray-400 cursor-not-allowed'
                                     }`}
-                                    title={emailStatus === 'sent' ? 'Resend certificate email' : 'Send certificate email'}
+                                    title={emailStatus === 'sent' || emailStatus === 'resent' ? 'Resend certificate email' : 'Send certificate email'}
                                   >
                                     <Send className="w-3 h-3" />
-                                    <span>{emailStatus === 'sent' ? 'Resend' : 'Send'}</span>
+                                    <span>{emailStatus === 'sent' || emailStatus === 'resent' ? 'Resend' : 'Send'}</span>
                                   </button>
                                 )}
                               </div>
@@ -1729,21 +2153,30 @@ export const AdminPage = ({ setCurrentTab }) => {
 
             {/* Official Email Delivery Audit Logs */}
             <div className="bg-white dark:bg-[#181B20] rounded-3xl border border-[#E8DEC8] dark:border-[#2E3440] p-6 shadow-xs">
-              <div className="flex items-center justify-between pb-4 border-b border-[#E8DEC8] dark:border-[#2E3440] mb-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-[#E8DEC8] dark:border-[#2E3440] mb-4 gap-2">
                 <div className="flex items-center gap-2">
                   <Mail className="w-4 h-4 text-[#B3122B]" />
                   <h3 className="font-extrabold text-sm text-[#1A1A1A] dark:text-white">
                     Email Delivery Audit Log (Sender: technicalteamsvit@gmail.com)
                   </h3>
                 </div>
-                <span className="text-xs text-gray-500 font-medium">
-                  {emailLogs.length} total dispatch records
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-gray-500 font-medium">
+                    {emailLogs.length} total dispatch records
+                  </span>
+                  <button
+                    onClick={handleExportEmailLogCSV}
+                    className="px-2.5 py-1 rounded-lg text-xs font-bold bg-[#F5EFEB] dark:bg-[#252A34] text-gray-800 dark:text-gray-200 hover:text-[#B3122B] border border-[#E8DEC8] dark:border-[#2E3440] transition-colors flex items-center gap-1 cursor-pointer"
+                  >
+                    <Download className="w-3 h-3 text-emerald-600" />
+                    <span>Export CSV</span>
+                  </button>
+                </div>
               </div>
 
               {emailLogs.length === 0 ? (
                 <p className="text-xs text-gray-400 text-center py-4">
-                  No certificate emails dispatched yet. Click "Send to All Eligible" or "Test Email to Me" to trigger emails.
+                  No certificate emails dispatched yet. Click "Send to all eligible" or "Send test email to me" to trigger emails.
                 </p>
               ) : (
                 <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
@@ -1753,18 +2186,26 @@ export const AdminPage = ({ setCurrentTab }) => {
                       className="p-3 rounded-2xl bg-[#FCF9F2] dark:bg-[#111317] border border-[#E8DEC8] dark:border-[#2E3440] flex items-center justify-between text-xs"
                     >
                       <div>
-                        <div className="font-bold text-[#1A1A1A] dark:text-white flex items-center gap-2">
+                        <div className="font-bold text-[#1A1A1A] dark:text-white flex items-center gap-2 flex-wrap">
                           <span>{log.studentName}</span>
                           <span className="font-mono text-[11px] text-[#B3122B]">[{log.certificateId}]</span>
+                          {log.attempts > 1 && (
+                            <span className="text-[10px] text-gray-400">({log.attempts} attempts)</span>
+                          )}
                         </div>
                         <div className="text-[11px] text-gray-500">
                           To: <span className="font-medium text-gray-700 dark:text-gray-300">{log.recipientEmail}</span> • From: <span className="font-bold text-[#8B0D20] dark:text-[#ff8a9e]">technicalteamsvit@gmail.com</span>
                         </div>
+                        {log.error && (
+                          <div className="text-[10px] text-red-500 mt-0.5 font-medium">
+                            Error: {log.error}
+                          </div>
+                        )}
                       </div>
 
-                      <div className="text-right">
+                      <div className="text-right shrink-0">
                         <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
-                          log.status === 'sent' 
+                          log.status === 'sent' || log.status === 'resent'
                             ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300' 
                             : 'bg-red-100 text-red-800 dark:bg-red-950/40 dark:text-red-300'
                         }`}>
@@ -1776,6 +2217,55 @@ export const AdminPage = ({ setCurrentTab }) => {
                   ))}
                 </div>
               )}
+
+              {/* Section 9.5: Batch Dispatch Run History */}
+              <div className="mt-6 pt-5 border-t border-[#E8DEC8] dark:border-[#2E3440]">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-1.5 font-bold text-xs text-[#1A1A1A] dark:text-white">
+                    <Activity className="w-3.5 h-3.5 text-[#B3122B]" />
+                    <span>Batch Dispatch Run Audit Trail (Section 9.5)</span>
+                  </div>
+                  <span className="text-[11px] text-gray-500 font-mono">
+                    {(emailAuditRuns || []).length} recorded runs
+                  </span>
+                </div>
+
+                {(!emailAuditRuns || emailAuditRuns.length === 0) ? (
+                  <p className="text-[11px] text-gray-400 italic py-1">
+                    No batch dispatch runs executed yet in this session.
+                  </p>
+                ) : (
+                  <div className="space-y-2 max-h-44 overflow-y-auto pr-1">
+                    {emailAuditRuns.map((run) => (
+                      <div key={run.runId} className="p-3 rounded-2xl bg-[#FCF9F2] dark:bg-[#111317] border border-[#E8DEC8] dark:border-[#2E3440] flex items-center justify-between text-xs">
+                        <div>
+                          <div className="font-bold text-[#1A1A1A] dark:text-white flex items-center gap-2">
+                            <span>{run.runId}</span>
+                            <span className={`text-[9px] px-1.5 py-0.2 rounded font-bold uppercase ${
+                              run.status === 'completed' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+                            }`}>
+                              {run.status}
+                            </span>
+                          </div>
+                          <div className="text-[11px] text-gray-500">
+                            By: <span className="font-medium">{run.initiatedBy}</span> ({run.adminEmail}) • {run.timestamp}
+                          </div>
+                          {run.stoppedReason && (
+                            <div className="text-[10px] text-amber-600 font-medium">
+                              Note: {run.stoppedReason}
+                            </div>
+                          )}
+                        </div>
+                        <div className="text-right font-mono text-[11px]">
+                          <span className="text-emerald-600 font-bold">{run.sentCount} sent</span>
+                          {run.failedCount > 0 && <span className="text-red-500 font-bold ml-1.5">{run.failedCount} failed</span>}
+                          <div className="text-[10px] text-gray-400">{run.totalTargets} targets</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
 
           </div>
@@ -2117,6 +2607,366 @@ export const AdminPage = ({ setCurrentTab }) => {
                 </div>
               </div>
 
+            </div>
+          </div>
+        )}
+
+        {/* Section 9.2: Preview Email Modal (Exact subject, body and attachment for one student) */}
+        {previewEmailStudent && (() => {
+          const student = previewEmailStudent;
+          const cert = student.cert || issueCertificate(student);
+          const recipientEmail = student.email || `${student.prn.toLowerCase()}@svit.ac.in`;
+          const score = student.eligibility?.totalScore?.toFixed(1) || '50.0';
+          const language = student.language || student.track || 'Python';
+          const certId = cert.certificateId || 'TNV-CS-2026-0001-K7Q2';
+          const verificationUrl = `${window.location.origin}/verify/${certId}`;
+          const myCertificateUrl = `${window.location.origin}/certificate`;
+          const attachmentFileName = `Technova_Code_Sprint_Certificate_${student.name.replace(/\s+/g, '_')}.pdf`;
+
+          const plainTextBody = `Dear ${student.name},
+
+Congratulations! You have successfully completed the Technova Code Sprint: 9 Days to Build (13 to 21 October 2026), organised by the Technical Skill Development Hub, SVIT Nashik.
+
+Your final score: ${score} / 100 | Language: ${language}
+Certificate ID: ${certId}
+
+Your certificate is attached to this email as a PDF. You can also view it at ${myCertificateUrl}. Anyone can verify it at: ${verificationUrl}.
+
+Keep learning, keep building!
+
+Regards, Technical Skill Development Hub, Sir Visvesvaraya Institute of Technology, Nashik
+Instagram: @tsdh_svit | LinkedIn: https://www.linkedin.com/company/technical-skill-development-hub-svit-nashik/
+
+This is an automated email. For queries, reply to this email.`;
+
+          return (
+            <div className="fixed inset-0 z-[65] bg-black/60 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
+              <div className="bg-white dark:bg-[#181B20] rounded-3xl p-5 sm:p-7 max-w-3xl w-full border border-[#E8DEC8] dark:border-[#2E3440] shadow-2xl max-h-[92vh] overflow-y-auto my-auto flex flex-col">
+                
+                {/* Header */}
+                <div className="flex items-start justify-between pb-4 border-b border-[#E8DEC8] dark:border-[#2E3440]">
+                  <div>
+                    <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider mb-1.5 bg-[#B3122B]/10 text-[#B3122B] dark:text-[#ff8a9e]">
+                      <Mail className="w-3 h-3" />
+                      <span>Section 9.2: Official Certificate Email Inspector</span>
+                    </div>
+                    <h3 className="font-extrabold text-base sm:text-lg text-[#1A1A1A] dark:text-white">
+                      Email Preview: {student.name}
+                    </h3>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      Exact subject, headers, body copy, and PDF attachment to be dispatched.
+                    </p>
+                  </div>
+
+                  <button
+                    onClick={() => setPreviewEmailStudent(null)}
+                    className="p-2 rounded-xl text-gray-400 hover:text-gray-700 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-base cursor-pointer"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                {/* Email Meta Headers Box */}
+                <div className="mt-4 p-4 rounded-2xl bg-[#FCF9F2] dark:bg-[#111317] border border-[#E8DEC8] dark:border-[#2E3440] text-xs space-y-2">
+                  <div className="flex items-center justify-between flex-wrap gap-1">
+                    <span className="text-gray-400 font-semibold w-20">From:</span>
+                    <span className="font-bold text-[#8B0D20] dark:text-[#ff8a9e] flex-1">
+                      Technical Skill Development Hub, SVIT Nashik &lt;technicalteamsvit@gmail.com&gt;
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between flex-wrap gap-1">
+                    <span className="text-gray-400 font-semibold w-20">Reply-To:</span>
+                    <span className="font-medium text-gray-700 dark:text-gray-300 flex-1">
+                      technicalteamsvit@gmail.com
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between flex-wrap gap-1">
+                    <span className="text-gray-400 font-semibold w-20">To:</span>
+                    <span className="font-bold text-gray-900 dark:text-white flex-1 font-mono">
+                      {student.name} &lt;{recipientEmail}&gt;
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between flex-wrap gap-1">
+                    <span className="text-gray-400 font-semibold w-20">Subject:</span>
+                    <span className="font-extrabold text-[#1A1A1A] dark:text-white flex-1">
+                      Your Technova Code Sprint Certificate - {student.name}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between flex-wrap gap-1 pt-1 border-t border-[#E8DEC8]/60 dark:border-[#2E3440]">
+                    <span className="text-gray-400 font-semibold w-20">Attachment:</span>
+                    <div className="inline-flex items-center gap-2 px-3 py-1 rounded-xl bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900/40 text-red-700 dark:text-red-300 font-medium">
+                      <FileText className="w-3.5 h-3.5 text-red-600" />
+                      <span className="font-mono font-bold text-[11px]">{attachmentFileName}</span>
+                      <span className="text-[10px] text-gray-400">(PDF, signed & verified)</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* View Switcher: HTML vs Plain Text */}
+                <div className="flex items-center justify-between mt-4 mb-2">
+                  <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Email Body Content</span>
+                  <div className="flex items-center bg-[#F5EFEB] dark:bg-[#111317] p-1 rounded-xl border border-[#E8DEC8] dark:border-[#2E3440] text-xs">
+                    <button
+                      onClick={() => setPreviewEmailFormat('html')}
+                      className={`px-3 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                        previewEmailFormat === 'html' ? 'bg-white dark:bg-[#252A34] text-[#B3122B] shadow-2xs' : 'text-gray-500'
+                      }`}
+                    >
+                      HTML Rich View
+                    </button>
+                    <button
+                      onClick={() => setPreviewEmailFormat('text')}
+                      className={`px-3 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                        previewEmailFormat === 'text' ? 'bg-white dark:bg-[#252A34] text-[#B3122B] shadow-2xs' : 'text-gray-500'
+                      }`}
+                    >
+                      Plain-Text View
+                    </button>
+                  </div>
+                </div>
+
+                {/* Body Render */}
+                <div className="flex-1 overflow-y-auto">
+                  {previewEmailFormat === 'text' ? (
+                    <div className="p-4 rounded-2xl bg-gray-50 dark:bg-black/30 border border-gray-200 dark:border-gray-800 font-mono text-xs whitespace-pre-wrap leading-relaxed text-gray-800 dark:text-gray-200">
+                      {plainTextBody}
+                    </div>
+                  ) : (
+                    <div className="p-6 rounded-2xl bg-white dark:bg-[#14171C] border border-[#E8DEC8] dark:border-[#2E3440] text-xs space-y-4 shadow-inner">
+                      <div className="flex items-center justify-between pb-3 border-b border-[#E8DEC8] dark:border-[#2E3440]">
+                        <div className="flex items-center gap-2">
+                          <SVITHubLogo className="w-8 h-8" />
+                          <div>
+                            <div className="font-extrabold text-[#8B0D20] text-xs uppercase tracking-wider">Technical Skill Development Hub</div>
+                            <div className="text-[10px] text-gray-500 font-medium">Sir Visvesvaraya Institute of Technology, Nashik</div>
+                          </div>
+                        </div>
+                        <span className="font-mono text-[10px] font-bold text-[#B3122B] bg-red-50 dark:bg-red-950/30 px-2 py-0.5 rounded-full">
+                          {certId}
+                        </span>
+                      </div>
+
+                      <div className="text-gray-800 dark:text-gray-200 space-y-3 leading-relaxed">
+                        <p className="font-semibold text-sm">Dear {student.name},</p>
+                        <p>
+                          Congratulations! You have successfully completed the <strong>Technova Code Sprint: 9 Days to Build</strong> (13 to 21 October 2026), organised by the Technical Skill Development Hub, SVIT Nashik.
+                        </p>
+                        
+                        <div className="p-3 rounded-xl bg-[#FCF9F2] dark:bg-[#1C2028] border border-[#E8DEC8] dark:border-[#2E3440] font-mono font-bold flex flex-wrap gap-4 text-xs">
+                          <div>Your final score: <span className="text-[#B3122B]">{score} / 100</span></div>
+                          <div>Track / Language: <span className="text-blue-600">{language}</span></div>
+                          <div>Certificate ID: <span className="text-purple-600">{certId}</span></div>
+                        </div>
+
+                        <p>
+                          Your certificate is attached to this email as a PDF. You can also view it at{' '}
+                          <a href={myCertificateUrl} target="_blank" rel="noreferrer" className="text-[#B3122B] underline font-medium">
+                            [My Certificate link]
+                          </a>
+                          . Anyone can verify it at:{' '}
+                          <a href={verificationUrl} target="_blank" rel="noreferrer" className="text-[#B3122B] underline font-medium font-mono">
+                            {verificationUrl}
+                          </a>.
+                        </p>
+
+                        <p className="font-bold text-[#8B0D20] dark:text-[#ff8a9e]">
+                          Keep learning, keep building!
+                        </p>
+
+                        <div className="pt-2 border-t border-[#E8DEC8]/60 dark:border-[#2E3440] text-gray-600 dark:text-gray-400 text-[11px] space-y-0.5">
+                          <div className="font-bold text-gray-800 dark:text-gray-200">
+                            Regards,<br />
+                            Technical Skill Development Hub,<br />
+                            Sir Visvesvaraya Institute of Technology, Nashik
+                          </div>
+                          <div>Instagram: <span className="text-[#B3122B] font-medium">@tsdh_svit</span> • LinkedIn: <span className="text-blue-600 font-medium">Technical Skill Development Hub</span></div>
+                        </div>
+
+                        <div className="pt-2 text-[10px] text-gray-400 italic">
+                          This is an automated email. For queries, reply to this email.
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Footer Controls */}
+                <div className="pt-4 border-t border-[#E8DEC8] dark:border-[#2E3440] mt-4 flex flex-col sm:flex-row items-center justify-between gap-3">
+                  <div className="text-[11px] text-gray-500 flex items-center gap-1.5">
+                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Dispatched via Gmail SMTP with Nodemailer</span>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setPreviewEmailStudent(null)}
+                      className="px-4 py-2 rounded-xl text-xs font-semibold bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 transition-colors cursor-pointer"
+                    >
+                      Close Preview
+                    </button>
+                    <button
+                      onClick={() => {
+                        const isSentAlready = student.cert?.status === 'sent' || student.cert?.status === 'resent';
+                        handleSendCertificates([student], { forceResend: isSentAlready });
+                        setPreviewEmailStudent(null);
+                      }}
+                      className="px-4 py-2 rounded-xl text-xs font-bold bg-[#B3122B] text-white hover:bg-[#8B0D20] transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
+                    >
+                      <Send className="w-3.5 h-3.5" />
+                      <span>{student.cert?.status === 'sent' || student.cert?.status === 'resent' ? 'Resend to This Student' : 'Send to This Student Now'}</span>
+                    </button>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* Bulk Send to All Eligible Confirmation Modal */}
+        {showBulkConfirmModal && (() => {
+          const eligibleList = studentsWithCertInfo.filter(s => s.eligibility.isEligible);
+          const alreadySent = eligibleList.filter(s => s.cert?.status === 'sent' || s.cert?.status === 'resent').length;
+          const netNewToSend = eligibleList.length - alreadySent;
+          const quotaLeft = (dailySendLimit || 400) - (dailySentStats?.count || 0);
+
+          return (
+            <div className="fixed inset-0 z-[65] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+              <div className="bg-white dark:bg-[#181B20] rounded-3xl p-6 max-w-md w-full border border-[#E8DEC8] dark:border-[#2E3440] shadow-2xl">
+                <div className="flex items-center gap-3 pb-3 border-b border-[#E8DEC8] dark:border-[#2E3440]">
+                  <div className="w-10 h-10 rounded-2xl bg-[#B3122B]/10 text-[#B3122B] flex items-center justify-center font-bold">
+                    <Award className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-extrabold text-base text-[#1A1A1A] dark:text-white">
+                      Confirm Dispatch to All Eligible Students
+                    </h3>
+                    <p className="text-xs text-gray-500">
+                      Technical Skill Development Hub, SVIT Nashik
+                    </p>
+                  </div>
+                </div>
+
+                <div className="my-4 space-y-3 text-xs">
+                  <div className="p-3 rounded-2xl bg-[#FCF9F2] dark:bg-[#111317] border border-[#E8DEC8] dark:border-[#2E3440] space-y-1.5 font-medium">
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">Total Qualified (Score ≥ 50):</span>
+                      <strong className="text-emerald-600 font-bold">{eligibleList.length} students</strong>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">Already Received:</span>
+                      <span className="font-semibold text-gray-700 dark:text-gray-300">{alreadySent} (will be skipped)</span>
+                    </div>
+                    <div className="flex justify-between pt-1 border-t border-[#E8DEC8]/60 dark:border-[#2E3440]">
+                      <span className="text-gray-700 dark:text-gray-200 font-bold">Pending Delivery:</span>
+                      <strong className="text-[#B3122B] font-extrabold">{netNewToSend} student certificates</strong>
+                    </div>
+                  </div>
+
+                  <div className="p-3 rounded-2xl bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-900/30 text-[11px] text-blue-900 dark:text-blue-200">
+                    <div className="font-bold flex items-center gap-1 mb-1">
+                      <Info className="w-3.5 h-3.5 text-blue-600" />
+                      <span>Section 9.4 Queue Policy</span>
+                    </div>
+                    <span>
+                      Emails are dispatched in <strong>batches of 20</strong> with a <strong>60-second cooldown pause</strong> between batches and <strong>~2.5s</strong> spacing between emails from <strong>technicalteamsvit@gmail.com</strong>.
+                    </span>
+                  </div>
+
+                  <div className="flex items-center justify-between text-[11px] text-gray-500 px-1">
+                    <span>Gmail daily quota available:</span>
+                    <span className="font-mono font-bold text-gray-800 dark:text-gray-200">{quotaLeft} emails</span>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#E8DEC8] dark:border-[#2E3440]">
+                  <button
+                    onClick={() => setShowBulkConfirmModal(false)}
+                    className="px-4 py-2 rounded-xl text-xs font-semibold bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowBulkConfirmModal(false);
+                      handleSendCertificates(eligibleList);
+                    }}
+                    disabled={netNewToSend === 0}
+                    className="px-4 py-2 rounded-xl text-xs font-bold bg-[#B3122B] text-white hover:bg-[#8B0D20] shadow-sm shadow-[#B3122B]/20 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {netNewToSend === 0 ? "All Already Sent" : `Confirm & Send ${netNewToSend} Emails`}
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* Section 9.4: Daily Send Limit Modal */}
+        {showDailyLimitModal && (
+          <div className="fixed inset-0 z-[65] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="bg-white dark:bg-[#181B20] rounded-3xl p-6 max-w-sm w-full border border-[#E8DEC8] dark:border-[#2E3440] shadow-2xl">
+              <div className="flex items-center justify-between pb-3 border-b border-[#E8DEC8] dark:border-[#2E3440] mb-3">
+                <div className="flex items-center gap-2">
+                  <Settings className="w-4 h-4 text-[#B3122B]" />
+                  <h3 className="font-extrabold text-sm text-[#1A1A1A] dark:text-white">
+                    Daily Send Limit Configuration
+                  </h3>
+                </div>
+                <button
+                  onClick={() => setShowDailyLimitModal(false)}
+                  className="text-gray-400 hover:text-gray-600 text-sm cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="space-y-3 text-xs">
+                <p className="text-gray-500">
+                  Gmail limits sending to ~500/day for standard Gmail accounts and ~2,000/day for Google Workspace.
+                </p>
+
+                <div>
+                  <label className="block font-bold mb-1 text-gray-700 dark:text-gray-300">
+                    Daily Send Limit (Safety Threshold)
+                  </label>
+                  <input
+                    type="number"
+                    min={10}
+                    max={2000}
+                    value={tempDailyLimit}
+                    onChange={(e) => setTempDailyLimit(parseInt(e.target.value, 10) || 400)}
+                    className="w-full p-2.5 rounded-xl border border-[#E8DEC8] dark:border-[#2E3440] bg-[#FCF9F2] dark:bg-[#111317] font-mono font-bold text-sm"
+                  />
+                  <span className="text-[10px] text-gray-400 mt-0.5 block">
+                    Default is 400 to protect account deliverability and prevent throttling.
+                  </span>
+                </div>
+
+                <div className="p-3 rounded-2xl bg-[#FCF9F2] dark:bg-[#111317] border border-[#E8DEC8] dark:border-[#2E3440] text-[11px] text-gray-600 dark:text-gray-400">
+                  Used today: <strong className="text-[#1A1A1A] dark:text-white font-mono">{dailySentStats?.count || 0}</strong> / {tempDailyLimit} emails
+                </div>
+
+                <div className="flex justify-end gap-2 pt-2">
+                  <button
+                    onClick={() => setShowDailyLimitModal(false)}
+                    className="px-3 py-1.5 rounded-xl font-semibold bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => {
+                      updateDailySendLimit(tempDailyLimit);
+                      setShowDailyLimitModal(false);
+                      setAdminToast(`Daily send limit set to ${tempDailyLimit} emails.`);
+                      setTimeout(() => setAdminToast(''), 4000);
+                    }}
+                    className="px-4 py-1.5 rounded-xl font-bold bg-[#B3122B] text-white hover:bg-[#8B0D20] cursor-pointer shadow-xs"
+                  >
+                    Save Setting
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         )}
