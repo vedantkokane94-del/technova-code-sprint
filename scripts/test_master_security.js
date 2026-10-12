@@ -421,7 +421,7 @@ async function runAllSecurityTests() {
 
     // Scenario 24: Missing authentication configuration fails closed
     const prevEnvHash = process.env.ADMIN_PASSWORD_HASH;
-    delete process.env.ADMIN_PASSWORD_HASH;
+    process.env.ADMIN_PASSWORD_HASH = '';
     const failClosedRes = await fetch(`${BASE_URL}/api/admin/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

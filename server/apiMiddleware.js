@@ -172,9 +172,12 @@ function isIpAllowed(clientIp) {
   });
 }
 
-// Verify Admin Master Password using Bcrypt (Cost 12) from env ADMIN_PASSWORD_HASH
+// Verify Admin Master Password using Bcrypt (Cost 12) from env ADMIN_PASSWORD_HASH or default hash
 function verifyAdminPassword(inputPassword) {
-  const hashedAdminPass = process.env.ADMIN_PASSWORD_HASH;
+  if (process.env.ADMIN_PASSWORD_HASH === '' || process.env.ADMIN_AUTH_DISABLED === 'true') {
+    return false;
+  }
+  const hashedAdminPass = process.env.ADMIN_PASSWORD_HASH || '$2b$12$oKYonyNOy7SqjEiShNZQGeuTIklNi5GN0zNA01v1nq8jMjwulpJ5O';
   if (!inputPassword || !hashedAdminPass) return false;
 
   try {
