@@ -223,17 +223,96 @@ export const TaskPage = ({ dayNumber, setCurrentTab }) => {
   const [tabSwitches, setTabSwitches] = useState(existingSub?.tabSwitches || 0);
   const [fullScreenExits, setFullScreenExits] = useState(existingSub?.fullScreenExits || 0);
 
+  // Quiz Disqualification State: Tab switching while solving or submitting task disqualifies student from quiz
+  const [isQuizDisqualified, setIsQuizDisqualified] = useState(() => {
+    if (existingSub?.quizDisqualified) return true;
+    const stored = localStorage.getItem(`quiz_disqualified_day_${task.day}_${user?.uid}`);
+    if (stored === 'true') return true;
+    if (existingSub?.tabSwitches > 0 && !existingSub?.quizSubmitted && !existingSub?.quizScore) return true;
+    return false;
+  });
+
+  const [showDisqualificationNotice, setShowDisqualificationNotice] = useState(false);
+  const [disqualificationMessage, setDisqualificationMessage] = useState('');
+
+  // Monitor tab switches and window blur (switching tabs/windows while attempting/submitting task disqualifies from quiz)
   useEffect(() => {
     if (isAdmin || user?.role === 'admin') return;
 
+    const handleTabSwitchEvent = (eventType) => {
+      setTabSwitches(prev => {
+        const nextCount = prev + 1;
+
+        // If quiz has not been submitted legitimately, disqualify student from attempting quiz
+        if (!quizSubmitted) {
+          setIsQuizDisqualified(true);
+          localStorage.setItem(`quiz_disqualified_day_${task.day}_${user?.uid}`, 'true');
+          setQuizScoreEarned(0);
+          setQuizCorrectCount(0);
+
+          // If quiz modal is currently open, terminate it immediately
+          setQuizOpen(false);
+          if (document.fullscreenElement && document.exitFullscreen) {
+            document.exitFullscreen().catch(() => {});
+          }
+
+          // Trigger warning modal
+          setDisqualificationMessage(
+            `Tab switching was detected while attempting or submitting the Day ${task.day} task (${eventType}). Contest integrity policy strictly prohibits navigating away or switching tabs. You are disqualified from attempting the Day ${task.day} Concept Quiz (0 / ${formatScore(maxQuizPoints)} pts). You can still submit and be evaluated on your program code solution.`
+          );
+          setShowDisqualificationNotice(true);
+
+          // Log proctoring flag
+          if (addProctoringFlag) {
+            addProctoringFlag({
+              userId: user?.uid,
+              studentName: user?.name,
+              day: task.day,
+              reason: `Disqualified from Quiz: Tab switch / focus loss detected (${eventType}) during task attempt`,
+              timestamp: new Date().toISOString(),
+              status: 'pending'
+            });
+          }
+
+          // Persist disqualification in submission immediately
+          submitTaskSolution({
+            day: task.day,
+            code,
+            language: selectedLanguage,
+            programScore: evaluationResult ? evaluationResult.programScore : (existingSub?.programScore || 0),
+            quizScore: 0,
+            quizCorrect: 0,
+            attempts: attemptsUsed,
+            tabSwitches: nextCount,
+            fullScreenExits,
+            proctoringFlagsCount,
+            quizDisqualified: true,
+            quizDisqualificationReason: `Tab switch detected (${eventType}) while attempting/submitting task`
+          });
+        }
+
+        return nextCount;
+      });
+    };
+
     const handleVisibility = () => {
       if (document.hidden) {
-        setTabSwitches(prev => prev + 1);
+        handleTabSwitchEvent('tab switched / document hidden');
       }
     };
+
+    const handleWindowBlur = () => {
+      handleTabSwitchEvent('window lost focus / switched window');
+    };
+
     document.addEventListener('visibilitychange', handleVisibility);
-    return () => document.removeEventListener('visibilitychange', handleVisibility);
-  }, [isAdmin, user]);
+    window.addEventListener('blur', handleWindowBlur);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('blur', handleWindowBlur);
+    };
+  }, [isAdmin, user, task.day, quizSubmitted, code, selectedLanguage, evaluationResult, existingSub, attemptsUsed, fullScreenExits, proctoringFlagsCount, maxQuizPoints]);
 
   // Quiz Modal State (Section 5 & 7)
   const [quizOpen, setQuizOpen] = useState(false);
@@ -319,8 +398,10 @@ export const TaskPage = ({ dayNumber, setCurrentTab }) => {
         code,
         language: selectedLanguage,
         programScore: evalOut.programScore,
-        quizScore: quizScoreEarned,
-        quizCorrect: quizCorrectCount,
+        quizScore: isQuizDisqualified ? 0 : quizScoreEarned,
+        quizCorrect: isQuizDisqualified ? 0 : quizCorrectCount,
+        quizDisqualified: isQuizDisqualified,
+        quizDisqualificationReason: isQuizDisqualified ? "Tab switching detected while attempting or submitting task" : '',
         attempts: nextAttempts,
         testResults: evalOut.testResults,
         tabSwitches,
@@ -345,6 +426,10 @@ export const TaskPage = ({ dayNumber, setCurrentTab }) => {
   // Open Quiz with Fullscreen enforcement (Section 5)
   const handleOpenQuiz = async () => {
     if (areControlsDisabled) return;
+    if (isQuizDisqualified) {
+      alert(`You are disqualified from taking the Day ${task.day} quiz due to tab switching.`);
+      return;
+    }
     try {
       if (document.documentElement.requestFullscreen) {
         await document.documentElement.requestFullscreen();
@@ -355,17 +440,40 @@ export const TaskPage = ({ dayNumber, setCurrentTab }) => {
     setQuizOpen(true);
   };
 
-  // Fullscreen exit tracking during Quiz
+  // Fullscreen exit tracking during Quiz: exiting fullscreen during quiz disqualifies student
   useEffect(() => {
     if (!quizOpen) return;
     const handleFullscreenChange = () => {
       if (!document.fullscreenElement) {
         setFullScreenExits(prev => prev + 1);
+        setIsQuizDisqualified(true);
+        localStorage.setItem(`quiz_disqualified_day_${task.day}_${user?.uid}`, 'true');
+        setQuizOpen(false);
+        setQuizScoreEarned(0);
+        setQuizCorrectCount(0);
+        setDisqualificationMessage(
+          `You exited full-screen mode during the quiz session. Exiting full-screen or switching windows during quizzes is an integrity violation. Your quiz has been closed and disqualified with 0 points.`
+        );
+        setShowDisqualificationNotice(true);
+        submitTaskSolution({
+          day: task.day,
+          code,
+          language: selectedLanguage,
+          programScore: evaluationResult ? evaluationResult.programScore : (existingSub?.programScore || 0),
+          quizScore: 0,
+          quizCorrect: 0,
+          attempts: attemptsUsed,
+          tabSwitches: tabSwitches + 1,
+          fullScreenExits: fullScreenExits + 1,
+          proctoringFlagsCount,
+          quizDisqualified: true,
+          quizDisqualificationReason: "Exited fullscreen during quiz session"
+        });
       }
     };
     document.addEventListener('fullscreenchange', handleFullscreenChange);
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
-  }, [quizOpen]);
+  }, [quizOpen, task.day, user?.uid, code, selectedLanguage, evaluationResult, existingSub, attemptsUsed, tabSwitches, fullScreenExits, proctoringFlagsCount]);
 
   // Quiz Timer: pauses during grace period
   useEffect(() => {
@@ -533,7 +641,7 @@ export const TaskPage = ({ dayNumber, setCurrentTab }) => {
     );
   }
 
-  const currentTotalDayScore = toScoreNumber((evaluationResult?.programScore || existingSub?.programScore || 0) + quizScoreEarned);
+  const currentTotalDayScore = toScoreNumber((evaluationResult?.programScore || existingSub?.programScore || 0) + (isQuizDisqualified ? 0 : quizScoreEarned));
 
   return (
     <div className="min-h-screen bg-[#FCF9F2] dark:bg-[#0F1115] transition-colors py-8 px-4 sm:px-6 lg:px-8 pb-24 relative">
@@ -664,6 +772,29 @@ export const TaskPage = ({ dayNumber, setCurrentTab }) => {
             <span className="text-[11px] bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded text-gray-600 dark:text-gray-400 font-mono">
               Attempts: {attemptsUsed} / 3 (Best kept)
             </span>
+          </div>
+
+          {/* Contest Tab-Switch Rule Notice */}
+          <div className={`mb-5 p-3 rounded-2xl border text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2 ${
+            isQuizDisqualified
+              ? 'bg-red-500/10 border-red-500/30 text-red-800 dark:text-red-300'
+              : 'bg-amber-500/10 border-amber-500/20 text-amber-900 dark:text-amber-200'
+          }`}>
+            <div className="flex items-center gap-2">
+              <ShieldAlert className={`w-4 h-4 shrink-0 ${isQuizDisqualified ? 'text-red-600' : 'text-amber-600'}`} />
+              <span>
+                {isQuizDisqualified ? (
+                  <><strong>Quiz Disqualified:</strong> Tab switching was detected during this session. You are disqualified from attempting the quiz.</>
+                ) : (
+                  <><strong>Contest Integrity Rule:</strong> Switching browser tabs or leaving this screen while attempting or submitting the task will <strong>disqualify you from attempting the daily quiz</strong>.</>
+                )}
+              </span>
+            </div>
+            {tabSwitches > 0 && (
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-300 border border-red-300 dark:border-red-900 shrink-0 self-start sm:self-auto">
+                {tabSwitches} tab switch{tabSwitches > 1 ? 'es' : ''} logged
+              </span>
+            )}
           </div>
 
           <div className="space-y-4">
@@ -952,15 +1083,22 @@ export const TaskPage = ({ dayNumber, setCurrentTab }) => {
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
               <div className="flex items-center gap-2">
-                <span className="w-6 h-6 rounded-lg bg-amber-500 text-white font-black text-xs flex items-center justify-center">
+                <span className={`w-6 h-6 rounded-lg font-black text-xs flex items-center justify-center text-white ${
+                  isQuizDisqualified ? 'bg-red-600' : 'bg-amber-500'
+                }`}>
                   Q
                 </span>
                 <h3 className="text-lg font-bold text-[#1A1A1A] dark:text-white">
                   Daily Concept Quiz (30% of Day Points = {formatScore(maxQuizPoints)} pts)
                 </h3>
+                {isQuizDisqualified && (
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-red-100 dark:bg-red-950/50 text-red-700 dark:text-red-300 border border-red-300 dark:border-red-900">
+                    Disqualified
+                  </span>
+                )}
               </div>
               <p className="text-xs text-gray-500 mt-1">
-                8 questions covering C, C++, Java, Python, and DSA. Enforces full-screen mode to prevent distraction.
+                8 questions covering C, C++, Java, Python, and DSA. Switching tabs during task solving or quiz disqualifies you from quiz points.
               </p>
             </div>
 
@@ -974,6 +1112,17 @@ export const TaskPage = ({ dayNumber, setCurrentTab }) => {
                     +{formatScore(quizScoreEarned)} / {formatScore(maxQuizPoints)} pts
                   </div>
                 </div>
+              ) : isQuizDisqualified ? (
+                <div className="flex items-center gap-2">
+                  <button
+                    disabled
+                    className="px-5 py-2.5 rounded-xl text-xs font-bold bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/30 flex items-center gap-2 cursor-not-allowed"
+                    title="Disqualified from quiz due to tab switching"
+                  >
+                    <XCircle className="w-4 h-4 text-red-600" />
+                    <span>Disqualified from Quiz (0.0 pts)</span>
+                  </button>
+                </div>
               ) : (
                 <button
                   onClick={handleOpenQuiz}
@@ -986,6 +1135,19 @@ export const TaskPage = ({ dayNumber, setCurrentTab }) => {
               )}
             </div>
           </div>
+
+          {/* Disqualification Banner */}
+          {isQuizDisqualified && (
+            <div className="mt-4 p-4 rounded-2xl bg-red-500/10 border border-red-500/30 text-red-800 dark:text-red-300 text-xs flex items-start gap-3">
+              <ShieldAlert className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
+              <div>
+                <div className="font-bold text-sm">Disqualified from Day {task.day} Concept Quiz</div>
+                <p className="mt-1 leading-relaxed">
+                  Tab switching or loss of window focus was detected while you were solving or submitting this task (Tab Switches logged: <strong>{tabSwitches}</strong>). Under Technova Code Sprint academic integrity rules, navigating away from the contest interface forfeits all quiz points for this day (<strong>0.0 / {formatScore(maxQuizPoints)} pts</strong>). Your program code is still evaluated for up to 70% of day points.
+                </p>
+              </div>
+            </div>
+          )}
         </div>
 
       </div>
@@ -1086,6 +1248,32 @@ export const TaskPage = ({ dayNumber, setCurrentTab }) => {
               </button>
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* Quiz Disqualification Alert Modal */}
+      {showDisqualificationNotice && (
+        <div className="fixed inset-0 z-[70] bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-white dark:bg-[#181B20] rounded-3xl p-6 sm:p-8 max-w-md w-full border border-red-500/40 shadow-2xl">
+            <div className="w-12 h-12 rounded-2xl bg-red-500/10 text-red-600 flex items-center justify-center mb-4">
+              <ShieldAlert className="w-6 h-6" />
+            </div>
+            <h3 className="text-lg font-black text-[#1A1A1A] dark:text-white">
+              Quiz Disqualification Notice
+            </h3>
+            <p className="text-xs text-gray-600 dark:text-gray-300 mt-2 leading-relaxed">
+              {disqualificationMessage}
+            </p>
+            <div className="mt-4 p-3 rounded-xl bg-[#FCF9F2] dark:bg-[#111317] border border-[#E8DEC8] dark:border-[#2E3440] text-[11px] text-gray-500">
+              <strong>Contest Rule:</strong> Switching browser tabs or leaving the contest window during a task attempt is prohibited. Your program code submission remains active and eligible for up to 70% of day points.
+            </div>
+            <button
+              onClick={() => setShowDisqualificationNotice(false)}
+              className="mt-5 w-full py-2.5 rounded-xl font-bold bg-[#B3122B] text-white hover:bg-[#8B0D20] text-xs transition-colors cursor-pointer shadow-xs"
+            >
+              I Understand
+            </button>
           </div>
         </div>
       )}

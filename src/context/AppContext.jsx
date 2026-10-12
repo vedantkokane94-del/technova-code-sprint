@@ -754,7 +754,9 @@ export const AppProvider = ({ children }) => {
     demoLink = '', 
     tabSwitches = 0,
     fullScreenExits = 0,
-    proctoringFlagsCount = 0
+    proctoringFlagsCount = 0,
+    quizDisqualified = false,
+    quizDisqualificationReason = ''
   }) => {
     if (!user) return { success: false, message: "Please sign in first." };
     if (user.role === 'admin' || isAdmin) {
@@ -776,26 +778,39 @@ export const AppProvider = ({ children }) => {
     const isCatchup = activeDay < getCurrentSprintDay(); // Catch-up if submitted for a past day
     const assignedVariant = getTaskVariant(user.uid, activeDay);
 
-    // Calculate score using Section 1 rules
-    const dayScoreObj = calculateDayScore({
-      day: activeDay,
-      programScore,
-      quizCorrect,
-      quizTotal,
-      isCatchup,
-      failedViva: false,
-      hasIntegrityViolation: false
-    });
-
     // Check if previous submission exists for this day
     const existingIndex = submissions.findIndex(s => s.userId === user.uid && Number(s.day) === activeDay);
     const prevSub = existingIndex >= 0 ? submissions[existingIndex] : null;
 
+    // Disqualify quiz if tab switched while attempting task, or explicitly disqualified
+    const isDisqualifiedFromQuiz = Boolean(
+      quizDisqualified || 
+      prevSub?.quizDisqualified || 
+      (tabSwitches > 0 && !prevSub?.quizSubmitted && !quizScore)
+    );
+    const effectiveQuizCorrect = isDisqualifiedFromQuiz ? 0 : quizCorrect;
+
+    // Calculate score using Section 1 rules
+    const dayScoreObj = calculateDayScore({
+      day: activeDay,
+      programScore,
+      quizCorrect: effectiveQuizCorrect,
+      quizTotal,
+      isCatchup,
+      failedViva: false,
+      hasIntegrityViolation: false,
+      quizDisqualified: isDisqualifiedFromQuiz
+    });
+
     // Best of 3 attempts
-    const currentPoints = dayScoreObj.dayTotal;
-    const finalPoints = prevSub ? Math.max(prevSub.points || 0, currentPoints) : currentPoints;
     const finalProgramScore = prevSub ? Math.max(prevSub.programScore || 0, dayScoreObj.programScore) : dayScoreObj.programScore;
-    const finalQuizScore = prevSub ? Math.max(prevSub.quizScore || 0, dayScoreObj.quizScore) : dayScoreObj.quizScore;
+    const finalQuizScore = isDisqualifiedFromQuiz ? 0 : (prevSub ? Math.max(prevSub.quizScore || 0, dayScoreObj.quizScore) : dayScoreObj.quizScore);
+    const currentPoints = isDisqualifiedFromQuiz 
+      ? toScoreNumber(finalProgramScore * (isCatchup ? 0.5 : 1.0))
+      : dayScoreObj.dayTotal;
+    const finalPoints = prevSub 
+      ? (isDisqualifiedFromQuiz ? currentPoints : Math.max(prevSub.points || 0, currentPoints)) 
+      : currentPoints;
     const attemptCount = (prevSub?.attempts || 0) + (attempts > 1 ? 0 : 1);
 
     const newSubData = {
@@ -818,7 +833,12 @@ export const AppProvider = ({ children }) => {
       testResults: testResults || prevSub?.testResults || null,
       programScore: finalProgramScore,
       quizScore: finalQuizScore,
-      quizCorrect: Math.max(prevSub?.quizCorrect || 0, quizCorrect),
+      quizCorrect: isDisqualifiedFromQuiz ? 0 : Math.max(prevSub?.quizCorrect || 0, quizCorrect),
+      quizDisqualified: isDisqualifiedFromQuiz,
+      quizDisqualificationReason: isDisqualifiedFromQuiz 
+        ? (quizDisqualificationReason || prevSub?.quizDisqualificationReason || "Tab switching detected while attempting or submitting task") 
+        : null,
+      quizSubmitted: !isDisqualifiedFromQuiz && (Boolean(prevSub?.quizSubmitted) || quizScore > 0 || quizCorrect > 0),
       points: finalPoints,
       rawTotal: dayScoreObj.rawTotal,
       isCatchup,

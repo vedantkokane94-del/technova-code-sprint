@@ -63,7 +63,8 @@ export function calculateDayScore({
   quizTotal = 8,
   isCatchup = false,
   failedViva = false,
-  hasIntegrityViolation = false
+  hasIntegrityViolation = false,
+  quizDisqualified = false
 }) {
   if (failedViva || hasIntegrityViolation) {
     return {
@@ -73,7 +74,8 @@ export function calculateDayScore({
       dayTotal: 0,
       isCatchup,
       failedViva,
-      hasIntegrityViolation
+      hasIntegrityViolation,
+      quizDisqualified
     };
   }
 
@@ -84,9 +86,9 @@ export function calculateDayScore({
   // Ensure programScore doesn't exceed 70% of day points
   const safeProgram = Math.min(Math.max(0, programScore), maxProgram);
 
-  // Quiz score: 30% * (correct / 8)
-  const quizRatio = quizTotal > 0 ? Math.min(1, Math.max(0, quizCorrect / quizTotal)) : 0;
-  const safeQuiz = maxQuiz * quizRatio;
+  // Quiz score: 30% * (correct / 8) - strictly 0 if disqualified from quiz due to tab switching
+  const quizRatio = (!quizDisqualified && quizTotal > 0) ? Math.min(1, Math.max(0, quizCorrect / quizTotal)) : 0;
+  const safeQuiz = quizDisqualified ? 0 : (maxQuiz * quizRatio);
 
   const rawTotal = safeProgram + safeQuiz;
 
@@ -101,7 +103,8 @@ export function calculateDayScore({
     dayTotal: toScoreNumber(finalDayScore),
     isCatchup,
     failedViva,
-    hasIntegrityViolation
+    hasIntegrityViolation,
+    quizDisqualified
   };
 }
 

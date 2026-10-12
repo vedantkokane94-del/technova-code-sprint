@@ -1292,6 +1292,14 @@ export const AdminPage = ({ setCurrentTab }) => {
                               Tab switches: <strong className={sub.tabSwitches > 0 ? 'text-red-600 font-bold' : ''}>{sub.tabSwitches}</strong>
                             </div>
 
+                            {/* Quiz Disqualification flag */}
+                            {(sub.quizDisqualified || (sub.tabSwitches > 0 && (!sub.quizScore || sub.quizScore === 0))) && (
+                              <span className="inline-flex items-center gap-1 text-[10px] bg-red-100 text-red-700 dark:bg-red-950/50 dark:text-red-300 font-bold px-1.5 py-0.5 rounded border border-red-300 dark:border-red-900" title={sub.quizDisqualificationReason || "Disqualified from quiz due to tab switching"}>
+                                <XCircle className="w-3 h-3 text-red-600" />
+                                <span>Quiz Disqualified (Tab Switch)</span>
+                              </span>
+                            )}
+
                             {/* Strict AI Prohibited flag */}
                             {sub.isAiDetected && (
                               <span className="inline-flex items-center gap-1 text-[10px] bg-red-600 text-white font-extrabold px-1.5 py-0.5 rounded shadow-2xs" title={sub.aiDetectionReason}>
@@ -1319,9 +1327,14 @@ export const AdminPage = ({ setCurrentTab }) => {
 
                         {/* Points */}
                         <td className="py-3 px-4">
-                          <span className={`text-sm font-black ${sub.failedViva ? 'text-red-500 line-through' : 'text-emerald-600'}`}>
-                            {sub.points} pts
-                          </span>
+                          <div className="flex flex-col">
+                            <span className={`text-sm font-black ${sub.failedViva ? 'text-red-500 line-through' : 'text-emerald-600'}`}>
+                              {sub.points} pts
+                            </span>
+                            <span className="text-[10px] text-gray-400 font-mono">
+                              Prog: {formatScore(sub.programScore)} | Quiz: {sub.quizDisqualified ? '0.0 (DQ)' : formatScore(sub.quizScore)}
+                            </span>
+                          </div>
                         </td>
 
                         {/* Viva Status */}
@@ -4012,6 +4025,11 @@ This is an automated email. For queries, reply to this email.`;
 
                                     <span>• Commits: <strong>{sub.commitCount || 1}</strong></span>
                                     <span>• Tab Switches: <strong className={sub.tabSwitches > 0 ? "text-red-600" : ""}>{sub.tabSwitches || 0}</strong></span>
+                                    {sub.quizDisqualified && (
+                                      <span className="px-1.5 py-0.5 rounded bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-300 text-[9px] font-bold">
+                                        Quiz Disqualified (Tab Switch)
+                                      </span>
+                                    )}
                                     {detectAiGeneratedContent(sub.solutionNote).isAiSuspected && (
                                       <span className="px-1.5 py-0.5 rounded bg-red-600 text-white text-[9px] font-black uppercase">
                                         AI Module Prohibited Flag
