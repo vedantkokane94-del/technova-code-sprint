@@ -19,7 +19,7 @@ const TEST_PORT = 5988;
 const BASE_URL = `http://127.0.0.1:${TEST_PORT}`;
 
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'technicalteamsvit@gmail.com';
-const ADMIN_PASSWORD = 'Sv1t#TechLead_2026!';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'BuildLearn@SVIT#9Q';
 const INVALID_PASSWORD = 'wrong-password-999';
 const INVALID_EMAIL = 'attacker@external-domain.com';
 
