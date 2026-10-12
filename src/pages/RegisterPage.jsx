@@ -6,14 +6,11 @@ import {
   Hash, 
   GraduationCap, 
   BookOpen, 
-  Layers, 
+  Code2, 
   CheckCircle, 
-  LogIn, 
-  Sparkles,
   ArrowRight
 } from 'lucide-react';
-
-import { SVITHubLogo, DurgaMataSketch } from '../components/BrandLogo';
+import { SVITHubLogo } from '../components/BrandLogo';
 
 export const RegisterPage = ({ setCurrentTab }) => {
   const { user, setUser } = useApp();
@@ -24,9 +21,8 @@ export const RegisterPage = ({ setCurrentTab }) => {
     prn: user?.role !== 'admin' ? (user?.prn || "") : "",
     year: user?.role !== 'admin' ? (user?.year || "First Year (FE)") : "First Year (FE)",
     branch: user?.role !== 'admin' ? (user?.branch || "Computer Engineering") : "Computer Engineering",
-    track: user?.role !== 'admin' ? (user?.track || "Web") : "Web"
+    language: user?.role !== 'admin' ? (user?.language || user?.track || "Python") : "Python"
   });
-
 
   const [isSuccess, setIsSuccess] = useState(false);
   const [error, setError] = useState("");
@@ -45,11 +41,11 @@ export const RegisterPage = ({ setCurrentTab }) => {
     "Final Year (BE)"
   ];
 
-  const tracks = [
-    { id: "Web", name: "Web Track", desc: "React, modern JS, responsive UI patterns" },
-    { id: "App", name: "App Track", desc: "Mobile-responsive patterns & layout engineering" },
-    { id: "Python", name: "Python Track", desc: "Scripting, OOP, text analysis, and mini tools" },
-    { id: "DSA", name: "DSA Track", desc: "Data structures, algorithms & test-case edge cases" }
+  const languages = [
+    { id: "C", name: "C Language", desc: "Core procedural logic, memory pointers & structured algorithms" },
+    { id: "C++", name: "C++", desc: "Modern C++, STL, classes, and algorithmic problem solving" },
+    { id: "Java", name: "Java", desc: "Object-oriented programming, standard collections & scalable code" },
+    { id: "Python", name: "Python", desc: "Pythonic syntax, built-in data types, parsing & rapid logic" }
   ];
 
   const handleChange = (e) => {
@@ -59,8 +55,8 @@ export const RegisterPage = ({ setCurrentTab }) => {
     }));
   };
 
-  const handleTrackSelect = (trackId) => {
-    setFormData(prev => ({ ...prev, track: trackId }));
+  const handleLanguageSelect = (langId) => {
+    setFormData(prev => ({ ...prev, language: langId }));
   };
 
   const handleSubmit = (e) => {
@@ -77,16 +73,17 @@ export const RegisterPage = ({ setCurrentTab }) => {
       prn: formData.prn.trim().toUpperCase(),
       year: formData.year,
       branch: formData.branch,
-      track: formData.track,
-      role: user?.role || "student",
-      avatar: user?.avatar || "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=120&h=120&fit=crop"
+      language: formData.language,
+      track: formData.language,
+      role: user?.role || "student"
+      // No external dummy profile photo loaded or stored (Section 6A)
     };
 
     setUser(updatedUser);
     setIsSuccess(true);
     setTimeout(() => {
       setCurrentTab('dashboard');
-    }, 1200);
+    }, 1000);
   };
 
   return (
@@ -97,9 +94,6 @@ export const RegisterPage = ({ setCurrentTab }) => {
         <div className="text-center mb-8">
           <div className="flex items-center justify-center gap-3 mb-3">
             <SVITHubLogo className="w-12 h-12" />
-            <div className="w-10 h-10 rounded-full bg-amber-500/10 text-[#B3122B] dark:text-[#ff8a9e] flex items-center justify-center border border-amber-500/20 shadow-xs" title="Shri Durga Mata Blessings">
-              <DurgaMataSketch className="w-7 h-7" />
-            </div>
           </div>
 
           <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-[#B3122B]/10 dark:bg-[#B3122B]/20 text-[#B3122B] dark:text-[#ff8a9e] text-xs font-bold mb-2">
@@ -110,18 +104,12 @@ export const RegisterPage = ({ setCurrentTab }) => {
             {user ? "Update Sprint Profile" : "New Student Registration"}
           </h1>
           <p className="text-sm text-[#6b6375] dark:text-[#94a3b8] mt-1">
-            Fill your academic details and select your learning track to receive your personalized task variants.
+            Fill your academic details and select your programming language to begin the 9-day challenge.
           </p>
         </div>
 
-        {/* Card */}
-        <div className="bg-white dark:bg-[#181B20] rounded-2xl sm:rounded-3xl p-5 sm:p-8 lg:p-10 border border-[#E8DEC8] dark:border-[#2E3440] shadow-sm relative overflow-hidden">
-          
-          {/* Subtle Watermark in registration card */}
-          <div className="absolute -top-10 -right-10 pointer-events-none opacity-[0.035] dark:opacity-[0.05] w-48 h-48 text-[#B3122B]">
-            <DurgaMataSketch className="w-full h-full" />
-          </div>
-
+        {/* Card (No internal watermark, Section 6D) */}
+        <div className="bg-white dark:bg-[#181B20] rounded-2xl sm:rounded-3xl p-5 sm:p-8 lg:p-10 border border-[#E8DEC8] dark:border-[#2E3440] shadow-sm relative">
           
           {/* Registration Form */}
           <form onSubmit={handleSubmit} className="space-y-5">
@@ -141,7 +129,7 @@ export const RegisterPage = ({ setCurrentTab }) => {
             {/* Name */}
             <div>
               <label className="block text-xs font-bold text-[#1A1A1A] dark:text-[#E2E8F0] mb-1.5">
-                Full Name
+                Full Name <span className="text-[#B3122B]">*</span>
               </label>
               <div className="relative">
                 <User className="w-4 h-4 text-gray-400 absolute left-3.5 top-3.5" />
@@ -160,7 +148,7 @@ export const RegisterPage = ({ setCurrentTab }) => {
             {/* Email */}
             <div>
               <label className="block text-xs font-bold text-[#1A1A1A] dark:text-[#E2E8F0] mb-1.5">
-                Email Address
+                Email Address <span className="text-[#B3122B]">*</span>
               </label>
               <div className="relative">
                 <Mail className="w-4 h-4 text-gray-400 absolute left-3.5 top-3.5" />
@@ -176,11 +164,11 @@ export const RegisterPage = ({ setCurrentTab }) => {
               </div>
             </div>
 
-            {/* Roll Number and Year in a grid */}
+            {/* Roll Number and Year */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-xs font-bold text-[#1A1A1A] dark:text-[#E2E8F0] mb-1.5">
-                  College Roll Number
+                  College Roll Number <span className="text-[#B3122B]">*</span>
                 </label>
                 <div className="relative">
                   <Hash className="w-4 h-4 text-gray-400 absolute left-3.5 top-3.5" />
@@ -236,18 +224,18 @@ export const RegisterPage = ({ setCurrentTab }) => {
               </div>
             </div>
 
-            {/* Track Selector */}
+            {/* Language Selector (4 Languages: C, C++, Java, Python) */}
             <div>
               <label className="block text-xs font-bold text-[#1A1A1A] dark:text-[#E2E8F0] mb-2">
-                Select Your Code Sprint Track
+                Choose Your Language Track <span className="text-[#B3122B]">*</span>
               </label>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {tracks.map((t) => {
-                  const selected = formData.track === t.id;
+                {languages.map((lang) => {
+                  const selected = formData.language.toLowerCase() === lang.id.toLowerCase();
                   return (
                     <div
-                      key={t.id}
-                      onClick={() => handleTrackSelect(t.id)}
+                      key={lang.id}
+                      onClick={() => handleLanguageSelect(lang.id)}
                       className={`p-3.5 rounded-xl border cursor-pointer transition-all ${
                         selected
                           ? 'border-[#B3122B] bg-[#B3122B]/5 dark:bg-[#B3122B]/15 ring-1 ring-[#B3122B]'
@@ -256,12 +244,12 @@ export const RegisterPage = ({ setCurrentTab }) => {
                     >
                       <div className="flex items-center justify-between">
                         <span className={`text-xs font-bold ${selected ? 'text-[#B3122B] dark:text-[#ff8a9e]' : 'text-[#1A1A1A] dark:text-white'}`}>
-                          {t.name}
+                          {lang.name}
                         </span>
                         {selected && <CheckCircle className="w-4 h-4 text-[#B3122B]" />}
                       </div>
                       <p className="text-[11px] text-[#6b6375] dark:text-[#94a3b8] mt-1">
-                        {t.desc}
+                        {lang.desc}
                       </p>
                     </div>
                   );
@@ -274,7 +262,7 @@ export const RegisterPage = ({ setCurrentTab }) => {
               type="submit"
               className="w-full mt-4 py-3.5 px-4 rounded-xl font-bold text-white bg-[#B3122B] hover:bg-[#8B0D20] shadow-md shadow-[#B3122B]/20 transition-all flex items-center justify-center gap-2 cursor-pointer"
             >
-              <span>Save Profile & Access Dashboard</span>
+              <span>Save Profile & Start Coding</span>
               <ArrowRight className="w-4 h-4" />
             </button>
           </form>

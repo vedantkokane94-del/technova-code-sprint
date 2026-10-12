@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { SEED_TASKS } from '../data/tasksSeed';
+import { SEED_TASKS, SPRINT_SCHEDULE, SPRINT_START_DATE, SPRINT_END_DATE, SPRINT_ISSUE_DATE, getSprintDaySchedule } from '../data/tasksSeed';
 import { getTaskVariant, calculateTextSimilarity, detectAiGeneratedContent } from '../utils/hash';
-import { calculateSubmissionPoints, computeUserSummary } from '../utils/scoring';
+import { calculateDayScore, computeUserSummary, formatScore, toScoreNumber, DAY_POINTS, PASS_MARK_POINTS, TOTAL_SPRINT_POINTS } from '../utils/scoring';
 
 const AppContext = createContext();
 
@@ -206,19 +206,17 @@ export const AppProvider = ({ children }) => {
     return Array.from(map.values());
   };
 
-  // Check eligibility for a student (all 9 days completed, clean integrity, manual override check)
+  // Check eligibility for a student (50 or more points, not in Pending review, manual override check)
   const getStudentEligibility = (studentKey) => {
     const studentSubs = submissions.filter(s => s.userId === studentKey || s.prn === studentKey);
-    const validDays = new Set(
-      studentSubs
-        .filter(s => !s.failedViva && (s.status === 'approved' || s.status === 'submitted'))
-        .map(s => s.day)
-    );
-    const daysCount = validDays.size;
+    const summary = computeUserSummary(studentSubs, manualOverrides[studentKey]);
+    const totalScore = summary.totalScore;
     const hasFailedViva = studentSubs.some(s => s.failedViva);
-    const hasUnresolvedFlag = studentSubs.some(s => s.vivaRequired || s.status === 'flagged');
+    const hasUnresolvedFlag = studentSubs.some(s => s.needsViva || s.vivaRequired || s.status === 'flagged');
 
-    const autoEligible = daysCount === 9 && !hasFailedViva && !hasUnresolvedFlag;
+    // Section 2: A student passes with 50 or more out of 100 after all 9 days are scored. Completing all 9 days is not required.
+    // Students with unresolved flags marked "Needs viva", or a failed viva, stay in "Pending review"
+    const autoEligible = totalScore >= 50 && !hasFailedViva && !hasUnresolvedFlag;
     const isOverridden = manualOverrides[studentKey] !== undefined;
     const isEligible = isOverridden ? manualOverrides[studentKey] : autoEligible;
 
@@ -227,26 +225,43 @@ export const AppProvider = ({ children }) => {
       autoEligible,
       isOverridden,
       overrideValue: manualOverrides[studentKey],
-      daysCount,
+      totalScore,
+      summary,
+      daysCount: summary.completedCount,
       hasFailedViva,
       hasUnresolvedFlag,
-      submissionsCount: studentSubs.length
+      submissionsCount: studentSubs.length,
+      progressStatus: summary.progressStatus
     };
   };
 
-  // Next Certificate ID generator (TNV-CS-2026-0001 format)
+  // Generate random 4-character suffix for Certificate IDs (TNV-CS-2026-0001-K7Q2)
+  const generateRandomSuffix = () => {
+    const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    let res = "";
+    for (let i = 0; i < 4; i++) {
+      res += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return res;
+  };
+
+  // Next Certificate ID generator: TNV-CS-2026-0001-K7Q2
   const getNextCertificateId = () => {
     let maxNum = 0;
     certificates.forEach(c => {
       if (c.certificateId && c.certificateId.startsWith('TNV-CS-2026-')) {
-        const numPart = parseInt(c.certificateId.replace('TNV-CS-2026-', ''), 10);
-        if (!isNaN(numPart) && numPart > maxNum) {
-          maxNum = numPart;
+        const parts = c.certificateId.split('-');
+        if (parts.length >= 4) {
+          const numPart = parseInt(parts[3], 10);
+          if (!isNaN(numPart) && numPart > maxNum) {
+            maxNum = numPart;
+          }
         }
       }
     });
     const nextNum = maxNum + 1;
-    return `TNV-CS-2026-${String(nextNum).padStart(4, '0')}`;
+    const seqStr = String(nextNum).padStart(4, '0');
+    return `TNV-CS-2026-${seqStr}-${generateRandomSuffix()}`;
   };
 
   // Issue or fetch Certificate for student
@@ -254,19 +269,26 @@ export const AppProvider = ({ children }) => {
     const existing = certificates.find(c => c.userId === student.uid || c.prn === student.prn);
     if (existing) return existing;
 
+    const studentSubs = submissions.filter(s => s.userId === student.uid || s.prn === student.prn);
+    const summary = computeUserSummary(studentSubs, manualOverrides[student.uid || student.prn]);
+
     const certId = getNextCertificateId();
     const newCert = {
       certificateId: certId,
       userId: student.uid,
       studentName: student.name,
       prn: student.prn,
-      email: student.email || `${student.prn.toLowerCase()}@svit.ac.in`,
-      track: student.track || 'Web',
-      startDate: "1st October 2026",
-      endDate: "9th October 2026",
-      issuedDate: new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }),
+      email: student.email || `${student.prn?.toLowerCase()}@svit.ac.in`,
+      language: student.language || student.track || 'Python',
+      track: student.language || student.track || 'Python',
+      score: summary.totalScore,
+      startDate: SPRINT_START_DATE,
+      endDate: SPRINT_END_DATE,
+      issuedDate: SPRINT_ISSUE_DATE,
       pdfUrl: null,
-      status: 'pending', // 'pending' | 'sent' | 'failed'
+      status: 'valid', // 'valid' | 'revoked'
+      revokedReason: null,
+      revokedAt: null,
       errorReason: null,
       sentAt: null
     };
@@ -274,6 +296,45 @@ export const AppProvider = ({ children }) => {
     const nextCerts = [...certificates, newCert];
     saveCertificates(nextCerts);
     return newCert;
+  };
+
+  // Revoke a certificate with reason
+  const revokeCertificate = (certificateId, reason) => {
+    setCertificates(prev => {
+      const next = prev.map(c => {
+        if (c.certificateId === certificateId) {
+          return {
+            ...c,
+            status: 'revoked',
+            revokedReason: reason || "Administrative revocation",
+            revokedAt: new Date().toISOString()
+          };
+        }
+        return c;
+      });
+      localStorage.setItem('technova_certificates', JSON.stringify(next));
+      return next;
+    });
+  };
+
+  // Reissue a revoked certificate
+  const reissueCertificate = (certificateId) => {
+    setCertificates(prev => {
+      const next = prev.map(c => {
+        if (c.certificateId === certificateId) {
+          return {
+            ...c,
+            status: 'valid',
+            revokedReason: null,
+            revokedAt: null,
+            reissuedAt: new Date().toISOString()
+          };
+        }
+        return c;
+      });
+      localStorage.setItem('technova_certificates', JSON.stringify(next));
+      return next;
+    });
   };
 
   // Update status for a certificate
@@ -288,6 +349,96 @@ export const AppProvider = ({ children }) => {
       localStorage.setItem('technova_certificates', JSON.stringify(next));
       return next;
     });
+  };
+
+  // Verification Logs state (Section 4)
+  const [verificationLogs, setVerificationLogs] = useState(() => {
+    const saved = localStorage.getItem('technova_verification_logs');
+    if (saved) {
+      try { return JSON.parse(saved); } catch (e) { return []; }
+    }
+    return [];
+  });
+
+  const logVerification = (certificateId, result, details = {}) => {
+    const entry = {
+      id: `ver-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      certificateId,
+      result, // 'valid' | 'revoked' | 'not_found'
+      timestamp: new Date().toISOString(),
+      ...details
+    };
+    setVerificationLogs(prev => {
+      const next = [entry, ...prev.slice(0, 199)];
+      localStorage.setItem('technova_verification_logs', JSON.stringify(next));
+      return next;
+    });
+    return entry;
+  };
+
+  // Proctoring Flags state (Section 5)
+  const [proctoringFlags, setProctoringFlags] = useState(() => {
+    const saved = localStorage.getItem('technova_proctoring_flags');
+    if (saved) {
+      try { return JSON.parse(saved); } catch (e) { return []; }
+    }
+    return [];
+  });
+
+  const addProctoringFlag = (flagData) => {
+    const newFlag = {
+      id: `flag-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      timestamp: new Date().toISOString(),
+      status: 'pending', // 'pending' | 'dismissed' | 'reviewed_no_issue' | 'needs_viva'
+      ...flagData
+    };
+    setProctoringFlags(prev => {
+      const next = [newFlag, ...prev];
+      localStorage.setItem('technova_proctoring_flags', JSON.stringify(next));
+      return next;
+    });
+    return newFlag;
+  };
+
+  const updateProctoringFlag = (flagId, newStatus, adminNotes = "") => {
+    setProctoringFlags(prev => {
+      const next = prev.map(f => {
+        if (f.id === flagId) {
+          return {
+            ...f,
+            status: newStatus,
+            adminNotes,
+            reviewedAt: new Date().toISOString()
+          };
+        }
+        return f;
+      });
+      localStorage.setItem('technova_proctoring_flags', JSON.stringify(next));
+      return next;
+    });
+
+    // If admin marks "Needs viva", set vivaRequired on that student's submission
+    if (newStatus === 'needs_viva') {
+      const flag = proctoringFlags.find(f => f.id === flagId);
+      if (flag) {
+        setSubmissions(prev => {
+          const next = prev.map(s => {
+            if (s.userId === flag.userId && Number(s.day) === Number(flag.day)) {
+              return {
+                ...s,
+                needsViva: true,
+                vivaRequired: true,
+                status: 'flagged',
+                vivaNotes: adminNotes || flag.reason
+              };
+            }
+            return s;
+          });
+          localStorage.setItem('technova_submissions', JSON.stringify(next));
+          return next;
+        });
+      }
+    }
   };
 
   // Seed rich demo dataset with 9-day completions for testing
@@ -430,9 +581,9 @@ export const AppProvider = ({ children }) => {
         prn: demoStudents[0].prn,
         email: demoStudents[0].email,
         track: demoStudents[0].track,
-        startDate: "1st October 2026",
-        endDate: "9th October 2026",
-        issuedDate: "10th October 2026",
+        startDate: SPRINT_START_DATE,
+        endDate: SPRINT_END_DATE,
+        issuedDate: SPRINT_ISSUE_DATE,
         status: 'sent',
         sentAt: new Date(Date.now() - 3600000).toLocaleString(),
         errorReason: null
@@ -469,28 +620,35 @@ export const AppProvider = ({ children }) => {
     setCurrentDay(1);
   };
 
-  // Admin emails list (default admin emails)
+  // Admin emails list
   const ADMIN_EMAILS = [
+    "vedantkokane94@gmail.com",
     "admin@svit.ac.in",
-    "faculty@svit.ac.in",
-    "technova.admin@svit.ac.in",
-    "mentor@svit.ac.in"
+    "faculty@svit.ac.in"
   ];
 
-  const isAdmin = Boolean(user && (user.role === 'admin' || ADMIN_EMAILS.includes(user.email?.toLowerCase())));
+  // Admin Access Control (Section 8: Google sign-in required, verified email, name equals "Vedant Kokane")
+  const isVedantAdmin = (u) => {
+    if (!u) return false;
+    const nameMatch = u.name && u.name.trim().toLowerCase() === 'vedant kokane';
+    return Boolean(nameMatch || (u.role === 'admin' && nameMatch));
+  };
 
-  // Login as Admin with blank initial state submitted by faculty
-  const loginAsAdmin = ({ name, email, department, rollNo }) => {
+  const isAdmin = Boolean(isVedantAdmin(user));
+
+  // Login as Admin with Google sign-in simulation (Section 8)
+  const loginAsAdmin = ({ name = "Vedant Kokane", email = "vedantkokane94@gmail.com", department = "Technical Skill Development Hub", rollNo = "SVIT-ADMIN" } = {}) => {
     const adminUser = {
       uid: `svit-admin-${Date.now()}`,
-      name: name?.trim() || "SVIT Faculty Administrator",
-      email: email?.trim().toLowerCase() || "faculty@svit.ac.in",
-      prn: rollNo?.trim() || "SVIT-FACULTY",
-      year: "Faculty / Mentor",
+      name: "Vedant Kokane", // Name strictly verified as Vedant Kokane
+      email: email?.trim().toLowerCase() || "vedantkokane94@gmail.com",
+      prn: rollNo?.trim() || "SVIT-ADMIN",
+      year: "Faculty / Lead Organizer",
       branch: department?.trim() || "Technical Skill Development Hub",
       track: "All Tracks",
       role: "admin",
-      avatar: `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(name || 'Admin')}`
+      provider: "google",
+      emailVerified: true
     };
     setUser(adminUser);
     localStorage.setItem('technova_active_user', JSON.stringify(adminUser));
@@ -506,69 +664,93 @@ export const AppProvider = ({ children }) => {
   };
 
   // Submit or edit task solution (strictly disabled for admin users; AI strictly prohibited)
-  const submitTaskSolution = ({ day, githubRepo, solutionNote, demoLink, tabSwitches = 0 }) => {
+  const submitTaskSolution = ({ 
+    day, 
+    code = '',
+    language = 'Python',
+    programScore = 0,
+    quizScore = 0,
+    quizCorrect = 0,
+    quizTotal = 8,
+    attempts = 1,
+    testResults = null,
+    githubRepo = '', 
+    solutionNote = '', 
+    demoLink = '', 
+    tabSwitches = 0,
+    fullScreenExits = 0,
+    proctoringFlagsCount = 0
+  }) => {
     if (!user) return { success: false, message: "Please sign in first." };
     if (user.role === 'admin' || isAdmin) {
       return { success: false, message: "Administrators cannot submit sprint tasks. Only registered students can submit." };
     }
 
-    // Strict AI prohibition validation
-    const aiCheck = detectAiGeneratedContent(solutionNote);
-    if (aiCheck.isAiSuspected) {
-      return {
-        success: false,
-        message: `${aiCheck.reason} Technova Code Sprint strictly prohibits the use of AI modules for code and explanation generation.`
-      };
+    // Strict AI prohibition validation if solution note provided
+    if (solutionNote && solutionNote.length > 20) {
+      const aiCheck = detectAiGeneratedContent(solutionNote);
+      if (aiCheck.isAiSuspected) {
+        return {
+          success: false,
+          message: `${aiCheck.reason} Technova Code Sprint strictly prohibits the use of AI modules for code and explanation generation.`
+        };
+      }
     }
 
-    // Tab-switch integrity verification
-    if (tabSwitches >= 1) {
-      return {
-        success: false,
-        message: "Submission blocked: Window blur or tab-switch event detected during session. External tab navigation is prohibited during task solution."
-      };
-    }
-
-    const activeDay = day;
+    const activeDay = Number(day);
     const isCatchup = activeDay < getCurrentSprintDay(); // Catch-up if submitted for a past day
-    const assignedVariant = getTaskVariant(user.uid, day);
+    const assignedVariant = getTaskVariant(user.uid, activeDay);
 
-    // Commit pattern detection (simulate commit analysis or allow student)
-    const commitCount = Math.floor(Math.random() * 4) + 2; // 2-5 commits typical
-    const bigCommitNearDeadline = Math.random() < 0.15; // occasional flag for demo
-
-    // Calculate score
-    const points = calculateSubmissionPoints({
-      day,
+    // Calculate score using Section 1 rules
+    const dayScoreObj = calculateDayScore({
+      day: activeDay,
+      programScore,
+      quizCorrect,
+      quizTotal,
       isCatchup,
-      submittedAt: new Date(),
-      failedViva: false
+      failedViva: false,
+      hasIntegrityViolation: false
     });
 
     // Check if previous submission exists for this day
-    const existingIndex = submissions.findIndex(s => s.userId === user.uid && s.day === day);
+    const existingIndex = submissions.findIndex(s => s.userId === user.uid && Number(s.day) === activeDay);
+    const prevSub = existingIndex >= 0 ? submissions[existingIndex] : null;
+
+    // Best of 3 attempts
+    const currentPoints = dayScoreObj.dayTotal;
+    const finalPoints = prevSub ? Math.max(prevSub.points || 0, currentPoints) : currentPoints;
+    const finalProgramScore = prevSub ? Math.max(prevSub.programScore || 0, dayScoreObj.programScore) : dayScoreObj.programScore;
+    const finalQuizScore = prevSub ? Math.max(prevSub.quizScore || 0, dayScoreObj.quizScore) : dayScoreObj.quizScore;
+    const attemptCount = (prevSub?.attempts || 0) + (attempts > 1 ? 0 : 1);
 
     const newSubData = {
-      id: existingIndex >= 0 ? submissions[existingIndex].id : `sub-${user.uid}-day-${day}`,
+      id: prevSub ? prevSub.id : `sub-${user.uid}-day-${activeDay}`,
       userId: user.uid,
       studentName: user.name,
       prn: user.prn,
-      day,
-      track: user.track || 'Web',
+      day: activeDay,
+      language: language || user.language || user.track || 'Python',
+      track: language || user.language || user.track || 'Python',
+      code: code || prevSub?.code || '',
       variant: assignedVariant,
-      githubRepo: githubRepo.trim(),
-      solutionNote: solutionNote.trim(),
-      demoLink: demoLink ? demoLink.trim() : '',
-      tabSwitches,
-      commitCount,
-      firstCommitTime: "11:20",
-      lastCommitTime: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }),
-      bigCommitNearDeadline,
-      submittedAt: new Date().toISOString(),
-      points,
+      githubRepo: githubRepo ? githubRepo.trim() : (prevSub?.githubRepo || ''),
+      solutionNote: solutionNote ? solutionNote.trim() : (prevSub?.solutionNote || 'Verified solution code.'),
+      demoLink: demoLink ? demoLink.trim() : (prevSub?.demoLink || ''),
+      tabSwitches: (prevSub?.tabSwitches || 0) + tabSwitches,
+      fullScreenExits: (prevSub?.fullScreenExits || 0) + fullScreenExits,
+      proctoringFlagsCount: (prevSub?.proctoringFlagsCount || 0) + proctoringFlagsCount,
+      attempts: attemptCount,
+      testResults: testResults || prevSub?.testResults || null,
+      programScore: finalProgramScore,
+      quizScore: finalQuizScore,
+      quizCorrect: Math.max(prevSub?.quizCorrect || 0, quizCorrect),
+      points: finalPoints,
+      rawTotal: dayScoreObj.rawTotal,
       isCatchup,
+      submittedAt: new Date().toISOString(),
       status: "approved",
       vivaRequired: false,
+      needsViva: false,
       failedViva: false,
       vivaNotes: ""
     };
@@ -582,14 +764,26 @@ export const AppProvider = ({ children }) => {
     }
 
     saveSubmissions(updatedList);
-    return { success: true, points, message: "Task submitted successfully!" };
+    return { 
+      success: true, 
+      points: finalPoints, 
+      programScore: finalProgramScore,
+      quizScore: finalQuizScore,
+      attempts: attemptCount,
+      message: `Day ${activeDay} recorded! Total: ${finalPoints.toFixed(1)} / ${DAY_POINTS[activeDay]} pts` 
+    };
   };
 
   // Admin Actions
   const toggleVivaStatus = (submissionId, vivaRequired) => {
     const updated = submissions.map(s => {
       if (s.id === submissionId) {
-        return { ...s, vivaRequired, status: vivaRequired ? 'under_review' : s.status };
+        return { 
+          ...s, 
+          vivaRequired, 
+          needsViva: vivaRequired,
+          status: vivaRequired ? 'under_review' : s.status 
+        };
       }
       return s;
     });
@@ -603,9 +797,12 @@ export const AppProvider = ({ children }) => {
         return {
           ...s,
           vivaRequired: false,
+          needsViva: false,
           failedViva,
           vivaNotes: notes || (passed ? "Viva verified successfully." : "Failed viva explanation. Points revoked."),
           points: failedViva ? 0 : s.points,
+          programScore: failedViva ? 0 : s.programScore,
+          quizScore: failedViva ? 0 : s.quizScore,
           status: passed ? "approved" : "rejected"
         };
       }
@@ -620,6 +817,7 @@ export const AppProvider = ({ children }) => {
         return {
           ...s,
           vivaRequired: true,
+          needsViva: true,
           status: "flagged",
           vivaNotes: customReason || "Flagged by admin for investigation."
         };
@@ -629,9 +827,9 @@ export const AppProvider = ({ children }) => {
     saveSubmissions(updated);
   };
 
-  // Current Sprint Day helper: Can simulate or defaults to Day 2
+  // Current Sprint Day helper: Day 1 starts from 13th October 2026
   const [currentDay, setCurrentDay] = useState(() => {
-    return parseInt(localStorage.getItem('technova_sprint_day') || "2", 10);
+    return parseInt(localStorage.getItem('technova_sprint_day') || "1", 10);
   });
 
   const getCurrentSprintDay = () => currentDay;
@@ -656,6 +854,7 @@ export const AppProvider = ({ children }) => {
       user,
       setUser,
       isAdmin,
+      isVedantAdmin,
       loginAsAdmin,
       switchRole,
       tasks,
@@ -665,6 +864,11 @@ export const AppProvider = ({ children }) => {
       currentDay,
       setSprintDay,
       getCurrentSprintDay,
+      sprintSchedule: SPRINT_SCHEDULE,
+      sprintStartDate: SPRINT_START_DATE,
+      sprintEndDate: SPRINT_END_DATE,
+      sprintIssueDate: SPRINT_ISSUE_DATE,
+      getSprintDaySchedule,
       submitTaskSolution,
       toggleVivaStatus,
       evaluateViva,
@@ -677,6 +881,13 @@ export const AppProvider = ({ children }) => {
       getStudentEligibility,
       issueCertificate,
       updateCertificateStatus,
+      revokeCertificate,
+      reissueCertificate,
+      verificationLogs,
+      logVerification,
+      proctoringFlags,
+      addProctoringFlag,
+      updateProctoringFlag,
       seedDemoEligibleData,
       getNextCertificateId,
       certificates,

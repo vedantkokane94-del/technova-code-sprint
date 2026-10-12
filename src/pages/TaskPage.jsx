@@ -1,62 +1,88 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useApp } from '../context/AppContext';
-import { getTaskVariant, detectAiGeneratedContent } from '../utils/hash';
+import { getTaskVariant } from '../utils/hash';
+import { getSprintDaySchedule } from '../data/tasksSeed';
+import { evaluateCodeSubmission, SUPPORTED_LANGUAGES, checkRequiredConcepts } from '../utils/codeJudge';
+import { QUIZ_QUESTIONS } from '../data/quizSeed';
+import { DAY_POINTS, formatScore, toScoreNumber } from '../utils/scoring';
+import { ProctoringMonitor } from '../components/ProctoringMonitor';
+import { ProctoringConsentModal } from '../components/ProctoringConsentModal';
 import confetti from 'canvas-confetti';
 import { 
   Lock, 
   Clock, 
-  HelpCircle, 
   Lightbulb, 
   CheckCircle2, 
-  ExternalLink, 
-  ShieldAlert, 
-  ArrowLeft, 
   AlertTriangle, 
   Sparkles,
-  Eye,
+  Play,
   Send,
-  Flame,
+  Code2,
   FileCode2,
-  Copy,
-  Ban,
-  AlertOctagon,
-  Bot,
-  LogOut,
-  RefreshCw
+  HelpCircle,
+  Maximize2,
+  Minimize2,
+  ChevronRight,
+  RotateCcw,
+  ShieldCheck,
+  ShieldAlert,
+  ArrowLeft,
+  XCircle,
+  Award,
+  Layers,
+  Cpu,
+  EyeOff
 } from 'lucide-react';
-import { Github } from '../components/GithubIcon';
-import { SVITHubLogo, DurgaMataSketch } from '../components/BrandLogo';
+import { SVITHubLogo } from '../components/BrandLogo';
 
 export const TaskPage = ({ dayNumber, setCurrentTab }) => {
-
-  const { user, tasks, submissions, submitTaskSolution, currentDay, isAdmin } = useApp();
+  const { 
+    user, 
+    tasks, 
+    submissions, 
+    submitTaskSolution, 
+    currentDay, 
+    isAdmin, 
+    addProctoringFlag 
+  } = useApp();
 
   const task = tasks.find(t => t.day === dayNumber) || tasks[0];
   const assignedVariantKey = getTaskVariant(user?.uid, task.day);
+  const maxDayPoints = DAY_POINTS[task.day] || 10;
+  const maxProgramPoints = maxDayPoints * 0.70;
+  const maxQuizPoints = maxDayPoints * 0.30;
 
-  // Check if DSA track applies
-  const isDsaTrack = user?.track === 'DSA' && task.dsaTrack;
-  const currentTaskDetails = isDsaTrack ? task.dsaTrack : task;
-  const variantData = currentTaskDetails.variants?.[assignedVariantKey] || {
-    name: `Variant ${assignedVariantKey}`,
-    instruction: "Complete the day assignment matching your assigned track criteria."
+  // Language track
+  const initialLang = (user?.language || user?.track || 'Python').toLowerCase();
+  const defaultLangId = ['c', 'cpp', 'java', 'python'].includes(initialLang) ? initialLang : 'python';
+  const [selectedLanguage, setSelectedLanguage] = useState(defaultLangId);
+
+  // Existing submission
+  const existingSub = submissions.find(s => s.userId === user?.uid && Number(s.day) === Number(task.day));
+
+  // Starter code templates
+  const getInitialCode = (langId) => {
+    if (existingSub?.code && (existingSub.language?.toLowerCase() === langId || existingSub.track?.toLowerCase() === langId)) {
+      return existingSub.code;
+    }
+    const found = SUPPORTED_LANGUAGES.find(l => l.id === langId);
+    return found ? found.template : '# Write your solution here\n';
   };
 
-  // Find existing submission if already submitted
-  const existingSub = submissions.find(s => s.userId === user?.uid && s.day === task.day);
+  const [code, setCode] = useState(() => getInitialCode(defaultLangId));
 
-  // Form State
-  const [githubRepo, setGithubRepo] = useState(existingSub?.githubRepo || "");
-  const [solutionNote, setSolutionNote] = useState(existingSub?.solutionNote || "");
-  const [demoLink, setDemoLink] = useState(existingSub?.demoLink || "");
-  const [honorCode, setHonorCode] = useState(!!existingSub);
-  const [submitting, setSubmitting] = useState(false);
-  const [feedback, setFeedback] = useState(null);
+  // Switch language handler
+  const handleLanguageChange = (langId) => {
+    setSelectedLanguage(langId);
+    if (!existingSub?.code || (existingSub.language?.toLowerCase() !== langId)) {
+      setCode(getInitialCode(langId));
+    }
+  };
 
-  // Progressive Hints (Hints 1, 2, 3)
+  // Progressive Hints
   const [unlockedHints, setUnlockedHints] = useState(() => {
     const saved = localStorage.getItem(`hints_day_${task.day}_${user?.uid}`);
-    return saved ? JSON.parse(saved) : [0]; // Hint 1 is free/revealed by default
+    return saved ? JSON.parse(saved) : [0];
   });
 
   const unlockNextHint = (index) => {
@@ -67,60 +93,105 @@ export const TaskPage = ({ dayNumber, setCurrentTab }) => {
     }
   };
 
-  // Integrity Feature: Tab-switch / blur ejection & anti-cheat system
-  const [tabSwitchCount, setTabSwitchCount] = useState(existingSub?.tabSwitches || 0);
-  const [isDisqualifiedByTabSwitch, setIsDisqualifiedByTabSwitch] = useState(false);
-  const [ejectionReason, setEjectionReason] = useState("");
+  // Consent & Proctoring State (Section 5)
+  const [consentGranted, setConsentGranted] = useState(() => {
+    const saved = localStorage.getItem(`proctoring_consent_${user?.uid || 'guest'}_day_${task.day}`);
+    return saved === 'true';
+  });
+  const [isAlternativeMode, setIsAlternativeMode] = useState(() => {
+    const saved = localStorage.getItem(`proctoring_alt_${user?.uid || 'guest'}_day_${task.day}`);
+    return saved === 'true';
+  });
+  const [proctoringActive, setProctoringActive] = useState(false);
+  const [proctoringGraceActive, setProctoringGraceActive] = useState(false);
+  const [proctoringFlagsCount, setProctoringFlagsCount] = useState(0);
+
+  const handleConsentAccept = () => {
+    setConsentGranted(true);
+    localStorage.setItem(`proctoring_consent_${user?.uid || 'guest'}_day_${task.day}`, 'true');
+  };
+
+  const handleRequestAlternative = (reason) => {
+    setIsAlternativeMode(true);
+    setConsentGranted(true);
+    localStorage.setItem(`proctoring_alt_${user?.uid || 'guest'}_day_${task.day}`, 'true');
+    localStorage.setItem(`proctoring_consent_${user?.uid || 'guest'}_day_${task.day}`, 'true');
+    addProctoringFlag({
+      userId: user?.uid,
+      studentName: user?.name,
+      day: task.day,
+      reason: `Alternative requested: ${reason || 'Camera/Mic not available'}. Scheduled for Faculty Viva.`,
+      status: 'pending'
+    });
+  };
+
+  const handleFlagCaptured = (flag) => {
+    setProctoringFlagsCount(prev => prev + 1);
+    addProctoringFlag({
+      userId: user?.uid,
+      studentName: user?.name,
+      day: task.day,
+      reason: flag.reason,
+      snapshotUrl: flag.snapshotUrl,
+      timestamp: flag.timestamp,
+      status: 'pending'
+    });
+  };
+
+  // Evaluation & Attempts State (Section 1 & 7)
+  const [evaluationResult, setEvaluationResult] = useState(existingSub?.testResults ? {
+    verdict: { label: existingSub.points >= maxProgramPoints * 0.8 ? 'Accepted' : 'Tested' },
+    programScore: existingSub.programScore || 0,
+    breakdown: {
+      correctness: (existingSub.programScore || 0) * 0.8,
+      efficiency: (existingSub.programScore || 0) * 0.1,
+      concepts: (existingSub.programScore || 0) * 0.1,
+      maxProgram: maxProgramPoints
+    },
+    testResults: existingSub.testResults,
+    feedback: "Previous evaluation saved.",
+    isCatchup: existingSub.isCatchup
+  } : null);
+
+  const [isRunningSample, setIsRunningSample] = useState(false);
+  const [sampleRunResult, setSampleRunResult] = useState(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [attemptsUsed, setAttemptsUsed] = useState(existingSub?.attempts || 0);
+
+  // Tab switches and full screen exit monitoring
+  const [tabSwitches, setTabSwitches] = useState(existingSub?.tabSwitches || 0);
+  const [fullScreenExits, setFullScreenExits] = useState(existingSub?.fullScreenExits || 0);
 
   useEffect(() => {
-    // Only monitor student active submission sessions
-    if (isAdmin || user?.role === 'admin' || existingSub) return;
+    if (isAdmin || user?.role === 'admin') return;
 
-    const handleTabViolation = (event) => {
-      setTabSwitchCount(prev => prev + 1);
-      setIsDisqualifiedByTabSwitch(true);
-      const reasonMsg = "You switched browser tabs or minimized the active sprint window. Tab switching is strictly prohibited to prevent external code copying and unauthorized AI usage.";
-      setEjectionReason(reasonMsg);
-    };
-
-    const handleVisibilityChange = () => {
+    const handleVisibility = () => {
       if (document.hidden) {
-        handleTabViolation('visibilitychange');
+        setTabSwitches(prev => prev + 1);
       }
     };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => document.removeEventListener('visibilitychange', handleVisibility);
+  }, [isAdmin, user]);
 
-    window.addEventListener('blur', handleTabViolation);
-    document.addEventListener('visibilitychange', handleVisibilityChange);
+  // Quiz Modal State (Section 5 & 7)
+  const [quizOpen, setQuizOpen] = useState(false);
+  const [quizAnswers, setQuizAnswers] = useState({});
+  const [quizSubmitted, setQuizSubmitted] = useState(Boolean(existingSub?.quizScore !== undefined && existingSub?.quizScore > 0));
+  const [quizScoreEarned, setQuizScoreEarned] = useState(existingSub?.quizScore || 0);
+  const [quizCorrectCount, setQuizCorrectCount] = useState(existingSub?.quizCorrect || 0);
+  const [quizTimeLeft, setQuizTimeLeft] = useState(600); // 10 minutes
+  const dayQuizQuestions = QUIZ_QUESTIONS[task.day] || [];
 
-    return () => {
-      window.removeEventListener('blur', handleTabViolation);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-    };
-  }, [isAdmin, user, existingSub]);
-
-  // Integrity Feature: Copy / Right-click block handlers
-  const handleContextMenu = (e) => {
-    e.preventDefault();
-  };
-
-  const handleCopyAttempt = (e) => {
-    e.preventDefault();
-  };
-
-  // Live Countdown to 11:59:59 PM IST
+  // Countdown timer to 11:59 PM IST
   const [timeLeft, setTimeLeft] = useState({ hours: 0, minutes: 0, seconds: 0 });
-
   useEffect(() => {
     const calculateTimeRemaining = () => {
       const now = new Date();
-      // Calculate end of day today (23:59:59 IST)
-      // IST is UTC + 5:30
       const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
       const istTime = new Date(utc + (3600000 * 5.5));
-
       const deadline = new Date(istTime);
       deadline.setHours(23, 59, 59, 999);
-
       const diff = deadline.getTime() - istTime.getTime();
       if (diff > 0) {
         const hours = Math.floor((diff / (1000 * 60 * 60)) % 24);
@@ -131,81 +202,172 @@ export const TaskPage = ({ dayNumber, setCurrentTab }) => {
         setTimeLeft({ hours: 0, minutes: 0, seconds: 0 });
       }
     };
-
     calculateTimeRemaining();
     const interval = setInterval(calculateTimeRemaining, 1000);
     return () => clearInterval(interval);
   }, []);
 
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    if (isAdmin || user?.role === 'admin') {
-      setFeedback({ type: 'error', text: 'Task submission is strictly disabled for faculty administrators.' });
-      return;
-    }
+  // Controls disabled when checks inactive and grace period expired (unless alternative mode)
+  const areControlsDisabled = !isAlternativeMode && !proctoringActive && !proctoringGraceActive;
 
-    if (isDisqualifiedByTabSwitch || tabSwitchCount > 0) {
-      setFeedback({ 
-        type: 'error', 
-        text: 'Submission Rejected: Browser tab switch detected. External navigation during submission is strictly prohibited.' 
+  // Run Sample Tests
+  const handleRunSampleTests = () => {
+    if (areControlsDisabled) return;
+    setIsRunningSample(true);
+    setSampleRunResult(null);
+
+    setTimeout(() => {
+      const evalOut = evaluateCodeSubmission(code, selectedLanguage, task.day, assignedVariantKey);
+      // Sample cases are test 1 and 2
+      const samples = evalOut.testResults.slice(0, 2).map((t, idx) => ({
+        ...t,
+        input: idx === 0 ? "Sample Input 1" : "Sample Input 2",
+        expectedOutput: idx === 0 ? "Sample Output 1" : "Sample Output 2",
+        actualOutput: t.passed ? (idx === 0 ? "Sample Output 1" : "Sample Output 2") : "Output mismatch"
+      }));
+      setSampleRunResult({
+        samples,
+        allPassed: samples.every(s => s.passed),
+        timeMs: evalOut.avgTimeMs,
+        memoryMb: evalOut.peakMemoryMb
       });
-      return;
-    }
-
-    // AI Prohibition Client Check
-    const aiCheck = detectAiGeneratedContent(solutionNote);
-    if (aiCheck.isAiSuspected) {
-      setFeedback({
-        type: 'error',
-        text: `${aiCheck.reason} Please explain the architecture using your own original words. AI modules (ChatGPT, Claude, Gemini, etc.) are strictly prohibited.`
-      });
-      return;
-    }
-
-    if (!githubRepo.trim().startsWith('http')) {
-      setFeedback({ type: 'error', text: 'Please enter a valid GitHub repository URL.' });
-      return;
-    }
-    if (solutionNote.trim().length < 25) {
-      setFeedback({ type: 'error', text: 'Please provide at least 2-3 lines in your own words explaining how you solved it.' });
-      return;
-    }
-    if (!honorCode) {
-      setFeedback({ type: 'error', text: 'You must confirm the Academic Integrity & No AI Honor Code before submitting.' });
-      return;
-    }
-
-    setSubmitting(true);
-    const result = submitTaskSolution({
-      day: task.day,
-      githubRepo,
-      solutionNote,
-      demoLink,
-      tabSwitches: tabSwitchCount
-    });
-
-    setSubmitting(false);
-    if (result.success) {
-      setFeedback({ 
-        type: 'success', 
-        text: `Success! Solution submitted! You earned ${result.points} points.` 
-      });
-
-      // Trigger Confetti effect
-      try {
-        confetti({
-          particleCount: 80,
-          spread: 70,
-          origin: { y: 0.6 }
-        });
-      } catch (err) {}
-    } else {
-      setFeedback({ type: 'error', text: result.message || 'Submission failed.' });
-    }
+      setIsRunningSample(false);
+    }, 450);
   };
 
-  const isLocked = task.day > currentDay;
+  // Submit Program
+  const handleSubmitProgram = () => {
+    if (areControlsDisabled) return;
+    if (attemptsUsed >= 3) {
+      alert("You have already used all 3 attempts for Day " + task.day + ". Your highest score is preserved.");
+      return;
+    }
 
+    setIsSubmitting(true);
+    setTimeout(() => {
+      const isCatchup = task.day < currentDay;
+      const evalOut = evaluateCodeSubmission(code, selectedLanguage, task.day, assignedVariantKey, { isCatchup });
+      setEvaluationResult(evalOut);
+
+      const nextAttempts = attemptsUsed + 1;
+      setAttemptsUsed(nextAttempts);
+
+      // Save submission into context
+      submitTaskSolution({
+        day: task.day,
+        code,
+        language: selectedLanguage,
+        programScore: evalOut.programScore,
+        quizScore: quizScoreEarned,
+        quizCorrect: quizCorrectCount,
+        attempts: nextAttempts,
+        testResults: evalOut.testResults,
+        tabSwitches,
+        fullScreenExits,
+        proctoringFlagsCount
+      });
+
+      setIsSubmitting(false);
+
+      if (evalOut.programScore >= maxProgramPoints * 0.7) {
+        try {
+          confetti({
+            particleCount: 70,
+            spread: 60,
+            origin: { y: 0.6 }
+          });
+        } catch (e) {}
+      }
+    }, 600);
+  };
+
+  // Open Quiz with Fullscreen enforcement (Section 5)
+  const handleOpenQuiz = async () => {
+    if (areControlsDisabled) return;
+    try {
+      if (document.documentElement.requestFullscreen) {
+        await document.documentElement.requestFullscreen();
+      }
+    } catch (e) {
+      console.warn("Fullscreen request:", e);
+    }
+    setQuizOpen(true);
+  };
+
+  // Fullscreen exit tracking during Quiz
+  useEffect(() => {
+    if (!quizOpen) return;
+    const handleFullscreenChange = () => {
+      if (!document.fullscreenElement) {
+        setFullScreenExits(prev => prev + 1);
+      }
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, [quizOpen]);
+
+  // Quiz Timer: pauses during grace period
+  useEffect(() => {
+    if (!quizOpen || quizSubmitted || proctoringGraceActive) return;
+    const interval = setInterval(() => {
+      setQuizTimeLeft(prev => {
+        if (prev <= 1) {
+          handleQuizSubmit();
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [quizOpen, quizSubmitted, proctoringGraceActive]);
+
+  // Submit Quiz
+  const handleQuizSubmit = () => {
+    let correct = 0;
+    dayQuizQuestions.forEach((q, idx) => {
+      if (quizAnswers[idx] === q.correctAnswer) {
+        correct++;
+      }
+    });
+
+    const isCatchup = task.day < currentDay;
+    const catchupMultiplier = isCatchup ? 0.5 : 1.0;
+    const earnedQuiz = toScoreNumber((correct / 8) * maxQuizPoints * catchupMultiplier);
+
+    setQuizCorrectCount(correct);
+    setQuizScoreEarned(earnedQuiz);
+    setQuizSubmitted(true);
+
+    // Update submission with quiz score
+    submitTaskSolution({
+      day: task.day,
+      code,
+      language: selectedLanguage,
+      programScore: evaluationResult ? evaluationResult.programScore : (existingSub?.programScore || 0),
+      quizScore: earnedQuiz,
+      quizCorrect: correct,
+      attempts: attemptsUsed,
+      tabSwitches,
+      fullScreenExits,
+      proctoringFlagsCount
+    });
+
+    // Exit fullscreen
+    if (document.fullscreenElement && document.exitFullscreen) {
+      document.exitFullscreen().catch(() => {});
+    }
+
+    try {
+      confetti({
+        particleCount: 50,
+        spread: 50,
+        origin: { y: 0.5 }
+      });
+    } catch (e) {}
+  };
+
+  // Locked Day Check
+  const isLocked = task.day > currentDay;
   if (isLocked) {
     return (
       <div className="min-h-screen bg-[#FCF9F2] dark:bg-[#0F1115] py-20 px-4 flex items-center justify-center">
@@ -215,11 +377,11 @@ export const TaskPage = ({ dayNumber, setCurrentTab }) => {
           </div>
           <h2 className="text-2xl font-bold text-[#1A1A1A] dark:text-white">Day {task.day} is Locked</h2>
           <p className="text-sm text-gray-500 mt-2">
-            This task unlocks daily at <strong>8:00 AM IST</strong> on Day {task.day}.
+            This task unlocks on <strong>{getSprintDaySchedule(task.day)?.fullDate}</strong> at <strong>8:00 AM IST</strong>.
           </p>
           <button
             onClick={() => setCurrentTab('dashboard')}
-            className="mt-6 px-6 py-2.5 rounded-xl font-bold bg-[#B3122B] text-white text-sm"
+            className="mt-6 px-6 py-2.5 rounded-xl font-bold bg-[#B3122B] text-white text-sm cursor-pointer"
           >
             Back to Dashboard
           </button>
@@ -228,126 +390,146 @@ export const TaskPage = ({ dayNumber, setCurrentTab }) => {
     );
   }
 
-  return (
-    <div className="min-h-screen bg-[#FCF9F2] dark:bg-[#0F1115] transition-colors py-8 px-4 sm:px-6 lg:px-8 pb-24 relative overflow-hidden">
-      
-      {/* Dynamic Per-User Watermark Overlay across page */}
-      <div className="fixed inset-0 pointer-events-none z-0 opacity-[0.08] dark:opacity-[0.12] select-none flex flex-wrap gap-24 p-10 font-black text-xl text-[#8B0D20] dark:text-[#ff8a9e] rotate-[-25deg] overflow-hidden">
-        {Array.from({ length: 48 }).map((_, i) => (
-          <div key={i} className="whitespace-nowrap">
-            {user?.name || "SVIT STUDENT"} • Roll No: {user?.prn || "STUDENT"} • शक्ति • विद्या • TECHNOVA 2026
-          </div>
-        ))}
-      </div>
+  const currentTotalDayScore = toScoreNumber((evaluationResult?.programScore || existingSub?.programScore || 0) + quizScoreEarned);
 
-      <div className="max-w-5xl mx-auto relative z-10">
+  return (
+    <div className="min-h-screen bg-[#FCF9F2] dark:bg-[#0F1115] transition-colors py-8 px-4 sm:px-6 lg:px-8 pb-24 relative">
+      
+      {/* Proctoring Consent Modal (Section 5) */}
+      {!consentGranted && !isAdmin && (
+        <ProctoringConsentModal
+          dayNumber={task.day}
+          onAccept={handleConsentAccept}
+          onRequestAlternative={handleRequestAlternative}
+        />
+      )}
+
+      {/* Floating Proctoring Monitor (Section 5) */}
+      {!isAdmin && consentGranted && (
+        <ProctoringMonitor
+          onStatusChange={setProctoringActive}
+          onGracePeriodChange={setProctoringGraceActive}
+          onFlagCaptured={handleFlagCaptured}
+          isAlternativeMode={isAlternativeMode}
+        />
+      )}
+
+      <div className="max-w-6xl mx-auto relative z-10">
         
         {/* Navigation Back */}
         <button
           onClick={() => setCurrentTab('dashboard')}
-          className="inline-flex items-center gap-2 text-xs font-bold text-gray-600 dark:text-gray-300 hover:text-[#B3122B] dark:hover:text-[#ff8a9e] mb-6 transition-colors"
+          className="inline-flex items-center gap-2 text-xs font-bold text-gray-600 dark:text-gray-300 hover:text-[#B3122B] dark:hover:text-[#ff8a9e] mb-6 transition-colors cursor-pointer"
         >
           <ArrowLeft className="w-4 h-4" />
           <span>Back to Sprint Dashboard</span>
         </button>
 
         {/* Header Bar */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white dark:bg-[#181B20] p-6 rounded-3xl border border-[#E8DEC8] dark:border-[#2E3440] shadow-xs mb-8 relative overflow-hidden">
-          {/* Subtle divine watermark in header */}
-          <div className="absolute right-36 -bottom-8 pointer-events-none opacity-[0.04] dark:opacity-[0.06] w-36 h-36 text-[#B3122B]">
-            <DurgaMataSketch className="w-full h-full" />
-          </div>
-
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white dark:bg-[#181B20] p-6 rounded-3xl border border-[#E8DEC8] dark:border-[#2E3440] shadow-xs mb-8">
           <div className="flex items-start gap-3">
             <SVITHubLogo className="w-12 h-12 shrink-0 mt-1" />
             <div>
-              <div className="flex items-center gap-2 mb-1">
+              <div className="flex items-center gap-2 mb-1 flex-wrap">
                 <span className="w-6 h-6 rounded-lg bg-[#B3122B] text-white font-black text-xs flex items-center justify-center">
                   D{task.day}
                 </span>
                 <span className="text-xs font-bold uppercase tracking-wider text-[#8B0D20] dark:text-[#ff8a9e]">
-                  {user?.track || "Web"} Track • {currentTaskDetails.level || task.level}
+                  {task.level} • {maxDayPoints} Points
                 </span>
                 <span className="text-xs text-amber-600 dark:text-amber-400 font-semibold hidden sm:inline">
-                  • Technical Skill Development Hub
+                  • {getSprintDaySchedule(task.day)?.fullDate}
                 </span>
+                {isAlternativeMode && (
+                  <span className="px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 text-[10px] font-bold border border-blue-500/20">
+                    Viva Alternative Active
+                  </span>
+                )}
               </div>
               <h1 className="text-2xl sm:text-3xl font-extrabold text-[#1A1A1A] dark:text-white">
-                {currentTaskDetails.title}
+                {task.title}
               </h1>
               <p className="text-xs text-gray-500 mt-1">
-                Assigned Variant: <strong className="text-[#B3122B]">Variant {assignedVariantKey} ({variantData.name})</strong>
+                Assigned Hash Variant: <strong className="text-[#B3122B]">Variant {assignedVariantKey}</strong> (Deterministic via User ID)
               </p>
             </div>
           </div>
 
-
-          {/* Countdown Clock to 11:59 PM IST */}
-          <div className="flex items-center gap-3 bg-[#FCF9F2] dark:bg-[#111317] px-4 py-3 rounded-2xl border border-[#E8DEC8] dark:border-[#2E3440]">
-            <Clock className="w-5 h-5 text-[#B3122B] animate-spin-slow" />
-            <div>
+          {/* Right Metrics: Score & Countdown */}
+          <div className="flex items-center gap-3">
+            {/* Day Score Pill */}
+            <div className="bg-[#FCF9F2] dark:bg-[#111317] px-4 py-3 rounded-2xl border border-[#E8DEC8] dark:border-[#2E3440] text-center">
               <div className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
-                Deadline (11:59 PM IST)
+                Day Score (70% Prog + 30% Quiz)
               </div>
-              <div className="text-lg font-mono font-black text-[#1A1A1A] dark:text-white">
-                {String(timeLeft.hours).padStart(2, '0')}:
-                {String(timeLeft.minutes).padStart(2, '0')}:
-                {String(timeLeft.seconds).padStart(2, '0')}
+              <div className="text-lg font-mono font-black text-[#B3122B] dark:text-[#ff8a9e]">
+                {formatScore(currentTotalDayScore)} / {maxDayPoints} pts
+              </div>
+            </div>
+
+            {/* Countdown Clock */}
+            <div className="flex items-center gap-2 bg-[#FCF9F2] dark:bg-[#111317] px-4 py-3 rounded-2xl border border-[#E8DEC8] dark:border-[#2E3440]">
+              <Clock className="w-4 h-4 text-gray-400 shrink-0" />
+              <div>
+                <div className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                  Deadline 11:59 PM IST
+                </div>
+                <div className="text-sm font-mono font-bold text-[#1A1A1A] dark:text-white">
+                  {String(timeLeft.hours).padStart(2, '0')}:{String(timeLeft.minutes).padStart(2, '0')}:{String(timeLeft.seconds).padStart(2, '0')}
+                </div>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Task Specification Card (Protected with no-copy & no-select) */}
-        <div 
-          onContextMenu={handleContextMenu}
-          onCopy={handleCopyAttempt}
-          className="no-copy-zone select-none bg-white dark:bg-[#181B20] rounded-3xl p-6 sm:p-8 border border-[#E8DEC8] dark:border-[#2E3440] shadow-sm mb-8 relative"
-        >
-          {/* Integrity Banner */}
+        {/* Task Objective Card */}
+        <div className="bg-white dark:bg-[#181B20] rounded-3xl p-6 sm:p-8 border border-[#E8DEC8] dark:border-[#2E3440] shadow-sm mb-8">
           <div className="flex items-center justify-between text-xs font-semibold text-gray-500 border-b border-[#E8DEC8]/50 dark:border-[#2E3440] pb-3 mb-5">
             <span className="flex items-center gap-1.5 text-[#B3122B] dark:text-[#ff8a9e]">
-              <ShieldAlert className="w-4 h-4" />
-              <span>Copy Protected • Personalized for {user?.name || "Student"} (Roll No: {user?.prn || "N/A"})</span>
+              <ShieldCheck className="w-4 h-4" />
+              <span>Personalized Task for {user?.name || "Student"} (Roll No: {user?.prn || "N/A"})</span>
             </span>
             <span className="text-[11px] bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded text-gray-600 dark:text-gray-400 font-mono">
-              Tab switches logged: {tabSwitchCount}
+              Attempts: {attemptsUsed} / 3 (Best kept)
             </span>
           </div>
 
-          {/* Description */}
           <div className="space-y-4">
             <div>
               <h2 className="text-sm font-bold text-gray-400 uppercase tracking-wider">
                 Objective
               </h2>
               <p className="text-base text-[#1A1A1A] dark:text-gray-100 font-medium leading-relaxed mt-1">
-                {currentTaskDetails.description}
+                {task.description}
               </p>
             </div>
 
-            {/* Student's Assigned Variant Instruction */}
+            {/* Variant Instruction */}
             <div className="p-4 rounded-2xl bg-[#B3122B]/5 dark:bg-[#B3122B]/15 border border-[#B3122B]/20">
               <div className="flex items-center gap-2 text-xs font-black text-[#B3122B] dark:text-[#ff8a9e] uppercase">
                 <Sparkles className="w-4 h-4" />
-                <span>Your Assigned Variant: Variant {assignedVariantKey} — {variantData.name}</span>
+                <span>Your Assigned Variant: Variant {assignedVariantKey}</span>
               </div>
               <p className="text-sm text-[#1A1A1A] dark:text-white font-semibold mt-1">
-                {variantData.instruction}
+                {task.variants?.[assignedVariantKey]?.instruction || "Implement the algorithm adhering strictly to standard input and output format."}
               </p>
             </div>
 
-            {/* Bonus (Optional) */}
-            {currentTaskDetails.bonus && (
-              <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-900 dark:text-amber-200">
-                <span className="font-bold">⭐ Optional Bonus: </span>
-                {currentTaskDetails.bonus}
+            {/* Scoring Breakdown Pill */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+              <div className="p-3 rounded-xl bg-[#FCF9F2] dark:bg-[#111317] border border-[#E8DEC8] dark:border-[#2E3440] text-xs">
+                <span className="font-bold text-[#1A1A1A] dark:text-white">Program Part: 70% ({formatScore(maxProgramPoints)} pts)</span>
+                <p className="text-gray-500 mt-0.5">80% Correctness (5 weighted tests) + 10% Efficiency + 10% Required Concepts.</p>
               </div>
-            )}
+              <div className="p-3 rounded-xl bg-[#FCF9F2] dark:bg-[#111317] border border-[#E8DEC8] dark:border-[#2E3440] text-xs">
+                <span className="font-bold text-[#1A1A1A] dark:text-white">Daily Quiz: 30% ({formatScore(maxQuizPoints)} pts)</span>
+                <p className="text-gray-500 mt-0.5">8 multiple-choice questions scored at (correct / 8) × 30% of day points.</p>
+              </div>
+            </div>
           </div>
         </div>
 
-        {/* Progressive 3 Hints Section */}
+        {/* Progressive Hints Section */}
         <div className="bg-white dark:bg-[#181B20] rounded-3xl p-6 sm:p-8 border border-[#E8DEC8] dark:border-[#2E3440] shadow-sm mb-8">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-bold text-[#1A1A1A] dark:text-white flex items-center gap-2">
@@ -355,15 +537,14 @@ export const TaskPage = ({ dayNumber, setCurrentTab }) => {
               <span>Progressive Hints (Revealed One at a Time)</span>
             </h2>
             <span className="text-xs text-gray-500 font-medium">
-              Zero penalty for viewing hints!
+              Zero score penalty for viewing hints
             </span>
           </div>
 
           <div className="space-y-3">
-            {currentTaskDetails.hints?.map((hint, idx) => {
+            {task.hints?.map((hint, idx) => {
               const isUnlocked = unlockedHints.includes(idx);
               const canUnlock = idx === 0 || unlockedHints.includes(idx - 1);
-
               return (
                 <div 
                   key={idx}
@@ -394,7 +575,7 @@ export const TaskPage = ({ dayNumber, setCurrentTab }) => {
                       <button
                         onClick={() => unlockNextHint(idx)}
                         disabled={!canUnlock}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                           canUnlock
                             ? 'bg-[#B3122B] text-white hover:bg-[#8B0D20]'
                             : 'bg-gray-200 dark:bg-gray-800 text-gray-400 cursor-not-allowed'
@@ -410,237 +591,333 @@ export const TaskPage = ({ dayNumber, setCurrentTab }) => {
           </div>
         </div>
 
-        {/* Prominent Mandatory Academic Integrity & AI Prohibition Notice */}
-        <div className="bg-red-500/10 dark:bg-red-500/15 border-2 border-red-500/30 rounded-3xl p-5 sm:p-6 mb-8 relative overflow-hidden shadow-xs">
-          <div className="flex items-start gap-3.5">
-            <div className="w-10 h-10 rounded-2xl bg-[#B3122B] text-white flex items-center justify-center shrink-0 shadow-sm mt-0.5">
-              <Ban className="w-5 h-5" />
-            </div>
-            <div className="flex-1">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="px-2.5 py-0.5 rounded-full bg-[#B3122B] text-white text-[10px] font-black uppercase tracking-wider">
-                  Mandatory Student Notice
-                </span>
-                <span className="text-xs font-black text-red-700 dark:text-red-400">
-                  Zero AI Policy & Real-time Tab Monitoring Active
-                </span>
-              </div>
-              <h3 className="text-base font-extrabold text-[#1A1A1A] dark:text-white mt-1">
-                Strict Prohibition of AI Modules & External Tab Navigation
-              </h3>
-              <p className="text-xs text-gray-700 dark:text-gray-300 mt-1 leading-relaxed">
-                The use of AI modules (including <strong>ChatGPT, Claude, Gemini, GitHub Copilot, v0, Cursor</strong>, or any LLM assistance) is <strong>strictly prohibited</strong> for code synthesis and solution notes. All submissions must be your original work.
+        {/* Code Editor & Test Runner Section */}
+        <div className="bg-white dark:bg-[#181B20] rounded-3xl p-6 sm:p-8 border border-[#E8DEC8] dark:border-[#2E3440] shadow-sm mb-8">
+          
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4 pb-4 border-b border-[#E8DEC8]/60 dark:border-[#2E3440]">
+            <div>
+              <h2 className="text-lg font-bold text-[#1A1A1A] dark:text-white flex items-center gap-2">
+                <Code2 className="w-5 h-5 text-[#B3122B]" />
+                <span>Program Solution Editor</span>
+              </h2>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Evaluated deterministically across 5 hidden test cases with execution time limits.
               </p>
-              <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                <div className="flex items-center gap-2 p-2.5 rounded-xl bg-white/80 dark:bg-[#181B20]/80 border border-red-500/20 text-red-800 dark:text-red-300 font-semibold">
-                  <AlertOctagon className="w-4 h-4 text-[#B3122B] shrink-0" />
-                  <span><strong>Tab Switch = Auto-Ejection:</strong> Switching browser tabs or minimizing instantly locks and disqualifies your submission session.</span>
-                </div>
-                <div className="flex items-center gap-2 p-2.5 rounded-xl bg-white/80 dark:bg-[#181B20]/80 border border-red-500/20 text-red-800 dark:text-red-300 font-semibold">
-                  <Bot className="w-4 h-4 text-[#B3122B] shrink-0" />
-                  <span><strong>AI Synthesis Inspection:</strong> AI-generated patterns trigger immediate academic flag and 0-score viva audit.</span>
-                </div>
-              </div>
+            </div>
+
+            {/* Language Selector Tabs */}
+            <div className="flex items-center gap-1.5 bg-[#FCF9F2] dark:bg-[#111317] p-1 rounded-xl border border-[#E8DEC8] dark:border-[#2E3440]">
+              {SUPPORTED_LANGUAGES.map((lang) => (
+                <button
+                  key={lang.id}
+                  onClick={() => handleLanguageChange(lang.id)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    selectedLanguage === lang.id
+                      ? 'bg-[#B3122B] text-white shadow-xs'
+                      : 'text-gray-600 dark:text-gray-400 hover:text-[#B3122B]'
+                  }`}
+                >
+                  {lang.name}
+                </button>
+              ))}
             </div>
           </div>
+
+          {/* Reset Template Button */}
+          <div className="flex items-center justify-between text-xs text-gray-500 mb-2">
+            <span>Editor ({SUPPORTED_LANGUAGES.find(l => l.id === selectedLanguage)?.version})</span>
+            <button
+              onClick={() => setCode(getInitialCode(selectedLanguage))}
+              className="inline-flex items-center gap-1 text-[11px] text-[#8B0D20] dark:text-[#ff8a9e] hover:underline cursor-pointer"
+            >
+              <RotateCcw className="w-3 h-3" />
+              <span>Reset Template</span>
+            </button>
+          </div>
+
+          {/* Code Textarea */}
+          <div className="relative rounded-2xl overflow-hidden border border-[#E8DEC8] dark:border-[#2E3440] bg-[#1E232B] text-gray-100 font-mono text-xs shadow-inner">
+            <textarea
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              rows={15}
+              spellCheck={false}
+              className="w-full p-4 bg-transparent outline-none resize-y leading-relaxed font-mono"
+              placeholder="// Write your code here..."
+            />
+          </div>
+
+          {/* Warning Banner if Checks Inactive */}
+          {areControlsDisabled && (
+            <div className="mt-4 p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400 text-xs font-bold flex items-center gap-2">
+              <EyeOff className="w-4 h-4 shrink-0" />
+              <span>Camera/Mic checks offline and grace period expired. Run, Submit, and Quiz are disabled until re-enabled or viva requested.</span>
+            </div>
+          )}
+
+          {/* Run & Submit Action Buttons */}
+          <div className="mt-5 flex flex-col sm:flex-row items-center justify-between gap-3">
+            <div className="flex items-center gap-3 w-full sm:w-auto">
+              <button
+                onClick={handleRunSampleTests}
+                disabled={isRunningSample || areControlsDisabled}
+                className="w-full sm:w-auto px-5 py-2.5 rounded-xl text-xs font-bold bg-[#FCF9F2] dark:bg-[#111317] border border-[#E8DEC8] dark:border-[#2E3440] text-[#1A1A1A] dark:text-white hover:border-[#B3122B] transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+              >
+                <Play className="w-3.5 h-3.5 text-emerald-600" />
+                <span>{isRunningSample ? "Running Tests..." : "Run Sample Tests (1 & 2)"}</span>
+              </button>
+
+              <button
+                onClick={handleSubmitProgram}
+                disabled={isSubmitting || attemptsUsed >= 3 || areControlsDisabled}
+                className="w-full sm:w-auto px-6 py-2.5 rounded-xl text-xs font-bold bg-[#B3122B] text-white hover:bg-[#8B0D20] shadow-md shadow-[#B3122B]/20 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+              >
+                <Send className="w-3.5 h-3.5" />
+                <span>
+                  {isSubmitting 
+                    ? "Evaluating Solution..." 
+                    : attemptsUsed >= 3 
+                    ? "3/3 Attempts Used (Best Kept)" 
+                    : `Submit Program (${attemptsUsed}/3 Attempts)`}
+                </span>
+              </button>
+            </div>
+
+            <div className="text-xs text-gray-500 font-medium">
+              Best of 3 submissions kept • Decimals to 1 place
+            </div>
+          </div>
+
+          {/* Sample Run Output Preview */}
+          {sampleRunResult && (
+            <div className="mt-6 p-4 rounded-2xl bg-[#FCF9F2] dark:bg-[#111317] border border-[#E8DEC8] dark:border-[#2E3440]">
+              <div className="flex items-center justify-between mb-3 text-xs font-bold">
+                <span className="flex items-center gap-2">
+                  <Play className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Sample Cases Run Output</span>
+                </span>
+                <span className="text-gray-500 font-mono text-[11px]">
+                  Avg: {sampleRunResult.timeMs}ms • Mem: {sampleRunResult.memoryMb}MB
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {sampleRunResult.samples.map((s, idx) => (
+                  <div key={idx} className="p-3 rounded-xl bg-white dark:bg-[#181B20] border border-[#E8DEC8]/60 dark:border-[#2E3440] text-xs">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="font-bold text-[#1A1A1A] dark:text-white">Sample Case #{idx + 1}</span>
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${s.passed ? 'bg-emerald-500/10 text-emerald-600' : 'bg-red-500/10 text-red-600'}`}>
+                        {s.passed ? 'PASSED' : 'FAILED'}
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-gray-500 mt-1">
+                      Runtime: {s.timeMs}ms • Memory: {s.memoryMb}MB
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Full Evaluation Result Card */}
+          {evaluationResult && (
+            <div className="mt-6 p-5 rounded-2xl bg-white dark:bg-[#15181E] border-2 border-[#B3122B]/30 shadow-xs">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[#E8DEC8]/60 dark:border-[#2E3440]">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-extrabold text-[#1A1A1A] dark:text-white">
+                      Program Score: {formatScore(evaluationResult.programScore)} / {formatScore(maxProgramPoints)} pts
+                    </span>
+                    <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold">
+                      {evaluationResult.verdict?.label || 'Evaluated'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-0.5">{evaluationResult.feedback}</p>
+                </div>
+
+                <div className="text-right text-xs">
+                  <div className="text-gray-400 font-medium">Program Breakdown</div>
+                  <div className="font-bold text-[#1A1A1A] dark:text-white">
+                    Correctness: {formatScore(evaluationResult.breakdown?.correctness)} • Efficiency: {formatScore(evaluationResult.breakdown?.efficiency)} • Concepts: {formatScore(evaluationResult.breakdown?.concepts)}
+                  </div>
+                </div>
+              </div>
+
+              {/* 5 Hidden Test Cases Details */}
+              <div className="mt-4">
+                <div className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">
+                  5 Test Cases Verdicts (Weights: 15%, 15%, 20%, 20%, 30%)
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-5 gap-2">
+                  {evaluationResult.testResults?.map((test, idx) => (
+                    <div 
+                      key={idx}
+                      className={`p-2.5 rounded-xl border text-center text-xs ${
+                        test.passed 
+                          ? 'bg-emerald-500/5 border-emerald-500/20 text-emerald-700 dark:text-emerald-400' 
+                          : 'bg-red-500/5 border-red-500/20 text-red-700 dark:text-red-400'
+                      }`}
+                    >
+                      <div className="font-bold text-[11px] truncate">
+                        {idx < 2 ? `Sample ${idx + 1}` : `Hidden #${idx + 1}`}
+                      </div>
+                      <div className="text-[10px] font-black mt-0.5">
+                        {test.passed ? "PASSED" : "FAILED"}
+                      </div>
+                      <div className="text-[9px] text-gray-500 mt-0.5 font-mono">
+                        {test.weightPercent}% • {test.timeMs}ms
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
-        {/* Submission Form / Faculty Preview Block */}
-        <div className="bg-white dark:bg-[#181B20] rounded-3xl p-6 sm:p-8 border border-[#E8DEC8] dark:border-[#2E3440] shadow-sm">
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-xl font-bold text-[#1A1A1A] dark:text-white flex items-center gap-2">
-              <FileCode2 className="w-5 h-5 text-[#B3122B]" />
-              <span>{isAdmin ? "Faculty Challenge Preview" : existingSub ? "Update Your Submission" : "Submit Your Solution"}</span>
-            </h2>
-            <span className="text-xs font-semibold text-gray-500">
-              {isAdmin ? "Admin Read-Only Inspection" : "Monitored Session • Single Window Required"}
-            </span>
+        {/* Daily Quiz Section (30% of Day Points) */}
+        <div className="bg-white dark:bg-[#181B20] rounded-3xl p-6 sm:p-8 border border-[#E8DEC8] dark:border-[#2E3440] shadow-sm mb-8">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="w-6 h-6 rounded-lg bg-amber-500 text-white font-black text-xs flex items-center justify-center">
+                  Q
+                </span>
+                <h3 className="text-lg font-bold text-[#1A1A1A] dark:text-white">
+                  Daily Concept Quiz (30% of Day Points = {formatScore(maxQuizPoints)} pts)
+                </h3>
+              </div>
+              <p className="text-xs text-gray-500 mt-1">
+                8 questions covering C, C++, Java, Python, and DSA. Enforces full-screen mode to prevent distraction.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-3">
+              {quizSubmitted ? (
+                <div className="text-right">
+                  <div className="text-xs font-bold text-emerald-600 dark:text-emerald-400">
+                    Quiz Completed: {quizCorrectCount}/8 Correct
+                  </div>
+                  <div className="text-sm font-mono font-black text-[#1A1A1A] dark:text-white">
+                    +{formatScore(quizScoreEarned)} / {formatScore(maxQuizPoints)} pts
+                  </div>
+                </div>
+              ) : (
+                <button
+                  onClick={handleOpenQuiz}
+                  disabled={areControlsDisabled}
+                  className="px-6 py-2.5 rounded-xl text-xs font-bold bg-amber-600 text-white hover:bg-amber-700 shadow-md shadow-amber-600/20 transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                >
+                  <Maximize2 className="w-3.5 h-3.5" />
+                  <span>Start Full-Screen Quiz (8 Questions)</span>
+                </button>
+              )}
+            </div>
           </div>
-
-          {feedback && (
-            <div className={`p-4 rounded-2xl mb-6 text-xs font-bold flex items-center gap-2 ${
-              feedback.type === 'success'
-                ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400'
-                : 'bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400'
-            }`}>
-              {feedback.type === 'success' ? <CheckCircle2 className="w-4 h-4" /> : <AlertTriangle className="w-4 h-4" />}
-              <span>{feedback.text}</span>
-            </div>
-          )}
-
-          {isAdmin ? (
-            /* Admin Mode: Explicitly disabled task submissions for admin */
-            <div className="p-6 sm:p-8 rounded-2xl bg-amber-500/5 dark:bg-amber-500/10 border border-amber-500/20 text-center">
-              <div className="w-12 h-12 rounded-2xl bg-[#B3122B]/10 text-[#B3122B] flex items-center justify-center mx-auto mb-3">
-                <ShieldAlert className="w-6 h-6" />
-              </div>
-              <h3 className="font-extrabold text-base text-[#1A1A1A] dark:text-white">
-                Task Submissions Disabled for Faculty Administrators
-              </h3>
-              <p className="text-xs text-gray-600 dark:text-gray-300 mt-2 max-w-lg mx-auto leading-relaxed">
-                You are currently logged in as an administrator previewing <strong>Day {task.day}</strong> sprint challenges. Task submissions and scoring are strictly reserved for registered SVIT students.
-              </p>
-              <div className="mt-5 flex items-center justify-center gap-3 flex-wrap">
-                <button
-                  type="button"
-                  onClick={() => setCurrentTab('admin')}
-                  className="px-5 py-2.5 rounded-xl font-bold text-xs bg-[#B3122B] text-white hover:bg-[#8B0D20] shadow-sm shadow-[#B3122B]/20 transition-all cursor-pointer"
-                >
-                  Open Faculty Admin Console
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setCurrentTab('dashboard')}
-                  className="px-4 py-2.5 rounded-xl font-semibold text-xs border border-[#E8DEC8] dark:border-[#2E3440] text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors cursor-pointer"
-                >
-                  Return to Dashboard
-                </button>
-              </div>
-            </div>
-          ) : isDisqualifiedByTabSwitch || (tabSwitchCount > 0 && !existingSub) ? (
-            /* Tab-Switch Disqualification / Ejection Screen */
-            <div className="p-8 sm:p-10 rounded-3xl bg-red-500/10 dark:bg-red-500/15 border-2 border-red-500 text-center space-y-4">
-              <div className="w-16 h-16 rounded-3xl bg-[#B3122B] text-white flex items-center justify-center mx-auto shadow-lg shadow-[#B3122B]/30 animate-pulse">
-                <Ban className="w-8 h-8" />
-              </div>
-              <div className="inline-block px-3 py-1 rounded-full bg-red-600 text-white font-black text-[11px] uppercase tracking-wider">
-                Ejected from Task Submission
-              </div>
-              <h3 className="text-xl sm:text-2xl font-black text-red-600 dark:text-red-400">
-                Tab Switch Violation Detected
-              </h3>
-              <p className="text-xs sm:text-sm text-gray-700 dark:text-gray-300 max-w-lg mx-auto leading-relaxed">
-                {ejectionReason || "You switched away from the active sprint window. In accordance with Technova SVIT Academic Integrity Rules, switching browser tabs or using external tools during task submission is strictly prohibited."}
-              </p>
-              
-              <div className="p-4 rounded-2xl bg-white dark:bg-[#181B20] border border-red-500/30 max-w-md mx-auto text-left text-xs space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-gray-500">Student:</span>
-                  <span className="font-bold text-[#1A1A1A] dark:text-white">{user?.name} (Roll No: {user?.prn})</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-gray-500">Violations Recorded:</span>
-                  <span className="font-mono font-bold text-red-600">{tabSwitchCount} tab switch event(s)</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-gray-500">Integrity Status:</span>
-                  <span className="font-bold text-[#B3122B]">Submission Form Locked</span>
-                </div>
-              </div>
-
-              <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-3">
-                <button
-                  type="button"
-                  onClick={() => setCurrentTab('dashboard')}
-                  className="px-6 py-2.5 rounded-xl text-xs font-bold bg-[#B3122B] text-white hover:bg-[#8B0D20] shadow-md shadow-[#B3122B]/20 transition-all flex items-center gap-2 cursor-pointer"
-                >
-                  <LogOut className="w-4 h-4" />
-                  <span>Return to Sprint Dashboard</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsDisqualifiedByTabSwitch(false);
-                    setTabSwitchCount(0);
-                    setFeedback(null);
-                  }}
-                  className="px-5 py-2.5 rounded-xl text-xs font-bold border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors flex items-center gap-2 cursor-pointer"
-                  title="Acknowledge violation rules and restart fresh session without switching tabs"
-                >
-                  <RefreshCw className="w-3.5 h-3.5" />
-                  <span>Acknowledge & Restart Session (0 Tabs)</span>
-                </button>
-              </div>
-            </div>
-          ) : (
-            /* Student Mode: Regular submission form */
-            <form onSubmit={handleSubmit} className="space-y-5">
-              {/* GitHub Repo */}
-              <div>
-                <label className="block text-xs font-bold text-[#1A1A1A] dark:text-white mb-1.5">
-                  GitHub Repository URL <span className="text-[#B3122B]">*</span>
-                </label>
-                <div className="relative">
-                  <Github className="w-4 h-4 text-gray-400 absolute left-3.5 top-3.5" />
-                  <input
-                    type="url"
-                    required
-                    placeholder="https://github.com/your-username/technova-day1"
-                    value={githubRepo}
-                    onChange={(e) => setGithubRepo(e.target.value)}
-                    className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-[#E8DEC8] dark:border-[#2E3440] bg-[#FCF9F2] dark:bg-[#111317] text-sm text-[#1A1A1A] dark:text-white focus:outline-hidden focus:border-[#B3122B] transition-colors"
-                  />
-                </div>
-                <p className="text-[11px] text-gray-500 mt-1">
-                  Make sure your repository is public and includes your commit history.
-                </p>
-              </div>
-
-              {/* Solution Explanation Note (2-3 lines) */}
-              <div>
-                <label className="block text-xs font-bold text-[#1A1A1A] dark:text-white mb-1.5">
-                  How I Solved It (2-3 lines) <span className="text-[#B3122B]">*</span>
-                </label>
-                <textarea
-                  rows={3}
-                  required
-                  placeholder="Briefly explain your thought process, data structures, or styling techniques used..."
-                  value={solutionNote}
-                  onChange={(e) => setSolutionNote(e.target.value)}
-                  className="w-full p-3 rounded-xl border border-[#E8DEC8] dark:border-[#2E3440] bg-[#FCF9F2] dark:bg-[#111317] text-sm text-[#1A1A1A] dark:text-white focus:outline-hidden focus:border-[#B3122B] transition-colors"
-                />
-                <p className="text-[11px] text-gray-500 mt-1">
-                  This note helps faculty assess your logic during random 2-minute vivas.
-                </p>
-              </div>
-
-              {/* Optional Live Demo Link */}
-              <div>
-                <label className="block text-xs font-bold text-[#1A1A1A] dark:text-white mb-1.5">
-                  Live Demo / Deployment Link (Optional)
-                </label>
-                <div className="relative">
-                  <ExternalLink className="w-4 h-4 text-gray-400 absolute left-3.5 top-3.5" />
-                  <input
-                    type="url"
-                    placeholder="https://your-project.vercel.app or GitHub Pages"
-                    value={demoLink}
-                    onChange={(e) => setDemoLink(e.target.value)}
-                    className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-[#E8DEC8] dark:border-[#2E3440] bg-[#FCF9F2] dark:bg-[#111317] text-sm text-[#1A1A1A] dark:text-white focus:outline-hidden focus:border-[#B3122B] transition-colors"
-                  />
-                </div>
-              </div>
-
-              {/* Honor Code Checkbox */}
-              <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/25">
-                <label className="flex items-start gap-3 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    required
-                    checked={honorCode}
-                    onChange={(e) => setHonorCode(e.target.checked)}
-                    className="mt-1 w-4 h-4 rounded text-[#B3122B] focus:ring-[#B3122B] border-gray-300"
-                  />
-                  <span className="text-xs text-amber-950 dark:text-amber-200 font-semibold leading-relaxed">
-                    Strict Academic Integrity Pledge: <em>"I wrote this code independently without using AI modules (ChatGPT, Claude, Gemini, Copilot, etc.) or external copy-paste tabs. I am prepared to live-code and explain my solution in a mandatory 2-minute faculty viva."</em>
-                  </span>
-                </label>
-              </div>
-
-              {/* Submit Action */}
-              <button
-                type="submit"
-                disabled={submitting}
-                className="w-full py-3.5 px-4 rounded-xl font-bold text-white bg-[#B3122B] hover:bg-[#8B0D20] shadow-md shadow-[#B3122B]/20 transition-all flex items-center justify-center gap-2 cursor-pointer"
-              >
-                <Send className="w-4 h-4" />
-                <span>{submitting ? "Verifying..." : existingSub ? "Update Submission" : "Submit Day Solution"}</span>
-              </button>
-            </form>
-          )}
         </div>
 
       </div>
+
+      {/* Full-Screen Quiz Modal (Section 5 & 7) */}
+      {quizOpen && (
+        <div className="fixed inset-0 z-50 bg-[#FCF9F2] dark:bg-[#0F1115] overflow-y-auto p-4 sm:p-8 flex flex-col justify-between">
+          <div className="max-w-4xl mx-auto w-full">
+            
+            {/* Top Bar with Timer and Integrity Notice */}
+            <div className="flex items-center justify-between p-4 rounded-2xl bg-white dark:bg-[#181B20] border border-[#E8DEC8] dark:border-[#2E3440] shadow-sm mb-6">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-xl bg-[#B3122B] text-white flex items-center justify-center font-black text-xs">
+                  D{task.day}
+                </div>
+                <div>
+                  <div className="text-xs font-bold text-[#1A1A1A] dark:text-white">
+                    Day {task.day} Daily Quiz (8 Questions)
+                  </div>
+                  <div className="text-[11px] text-gray-500">
+                    Full-Screen Session • Exits logged: {fullScreenExits}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-4">
+                <div className="text-right">
+                  <div className="text-[10px] uppercase font-bold text-gray-400">Time Remaining</div>
+                  <div className="text-base font-mono font-black text-[#B3122B] dark:text-[#ff8a9e]">
+                    {Math.floor(quizTimeLeft / 60)}:{String(quizTimeLeft % 60).padStart(2, '0')}
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => setQuizOpen(false)}
+                  className="p-2 rounded-xl text-gray-400 hover:text-gray-600 cursor-pointer"
+                  title="Close Quiz Modal"
+                >
+                  <Minimize2 className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* Questions List */}
+            <div className="space-y-4 mb-8">
+              {dayQuizQuestions.map((q, qIdx) => (
+                <div key={q.id} className="p-5 rounded-2xl bg-white dark:bg-[#181B20] border border-[#E8DEC8] dark:border-[#2E3440] shadow-xs">
+                  <div className="flex items-start gap-2.5 mb-3">
+                    <span className="w-6 h-6 rounded-lg bg-[#B3122B]/10 text-[#B3122B] font-bold text-xs flex items-center justify-center shrink-0">
+                      {qIdx + 1}
+                    </span>
+                    <div>
+                      <h4 className="text-sm font-bold text-[#1A1A1A] dark:text-white leading-snug">
+                        {q.question}
+                      </h4>
+                      <span className="text-[10px] text-gray-400 font-semibold">{q.category}</span>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3">
+                    {q.options.map((opt, optIdx) => {
+                      const isSelected = quizAnswers[qIdx] === optIdx;
+                      return (
+                        <button
+                          key={optIdx}
+                          type="button"
+                          onClick={() => setQuizAnswers(prev => ({ ...prev, [qIdx]: optIdx }))}
+                          className={`p-3 rounded-xl border text-left text-xs font-semibold transition-all flex items-center gap-2.5 cursor-pointer ${
+                            isSelected
+                              ? 'bg-[#B3122B]/10 dark:bg-[#B3122B]/20 border-[#B3122B] text-[#B3122B] dark:text-[#ff8a9e]'
+                              : 'bg-[#FCF9F2] dark:bg-[#111317] border-[#E8DEC8] dark:border-[#2E3440] text-gray-700 dark:text-gray-300 hover:border-gray-400'
+                          }`}
+                        >
+                          <span className={`w-4 h-4 rounded-full border flex items-center justify-center text-[10px] font-bold ${
+                            isSelected ? 'border-[#B3122B] bg-[#B3122B] text-white' : 'border-gray-400 text-gray-500'
+                          }`}>
+                            {String.fromCharCode(65 + optIdx)}
+                          </span>
+                          <span>{opt}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Quiz Submit Bar */}
+            <div className="sticky bottom-4 p-4 rounded-2xl bg-white dark:bg-[#181B20] border border-[#E8DEC8] dark:border-[#2E3440] shadow-lg flex items-center justify-between">
+              <div className="text-xs text-gray-500 font-medium">
+                Answered: {Object.keys(quizAnswers).length} / 8 Questions
+              </div>
+              <button
+                onClick={handleQuizSubmit}
+                className="px-6 py-2.5 rounded-xl text-xs font-bold bg-[#B3122B] text-white hover:bg-[#8B0D20] shadow-md shadow-[#B3122B]/20 cursor-pointer"
+              >
+                Submit & Grade Quiz
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
+
     </div>
   );
 };

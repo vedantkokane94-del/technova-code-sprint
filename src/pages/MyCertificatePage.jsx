@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { CertificateView } from '../components/CertificateView';
+import { computeUserSummary, formatScore } from '../utils/scoring';
 import { 
   Award, 
   Lock, 
@@ -9,12 +10,15 @@ import {
   ArrowRight, 
   FileCheck2, 
   Share2, 
-  Info,
-  Calendar
+  ExternalLink,
+  Copy,
+  Clock,
+  ShieldAlert
 } from 'lucide-react';
 
 export const MyCertificatePage = ({ setCurrentTab }) => {
-  const { user, submissions = [], certificates = [], eligibleStudents = [] } = useApp();
+  const { user, submissions = [], certificates = [], getStudentEligibility, manualOverrides } = useApp();
+  const [copiedLink, setCopiedLink] = useState(false);
 
   if (!user) {
     return (
@@ -29,7 +33,7 @@ export const MyCertificatePage = ({ setCurrentTab }) => {
           </p>
           <button
             onClick={() => setCurrentTab('register')}
-            className="mt-6 px-6 py-2.5 rounded-xl font-bold bg-[#B3122B] text-white text-sm"
+            className="mt-6 px-6 py-2.5 rounded-xl font-bold bg-[#B3122B] text-white text-sm cursor-pointer"
           >
             Register / Sign In
           </button>
@@ -39,20 +43,22 @@ export const MyCertificatePage = ({ setCurrentTab }) => {
   }
 
   // Filter user submissions
-  const userSubmissions = submissions.filter(s => s.userId === user.uid);
-  const completedDays = new Set(
-    userSubmissions
-      .filter(s => !s.failedViva && (s.status === 'approved' || s.status === 'submitted'))
-      .map(s => s.day)
-  );
+  const userSubmissions = submissions.filter(s => s.userId === user.uid || s.prn === user.prn);
+  const summary = computeUserSummary(userSubmissions, manualOverrides[user.uid || user.prn]);
+  const eligibility = getStudentEligibility(user.uid || user.prn);
 
   // Check if student has issued certificate
-  const myCert = certificates.find(c => c.userId === user.uid || c.prn === user.prn);
+  const myCert = certificates.find(c => (c.userId === user.uid || c.prn === user.prn) && c.status !== 'revoked');
 
-  // Eligibility evaluation: all 9 days solved + no unresolved flag or failed viva
-  const hasFailedViva = userSubmissions.some(s => s.failedViva);
-  const hasUnresolvedFlag = userSubmissions.some(s => s.vivaRequired || s.status === 'flagged');
-  const isEligible = completedDays.size === 9 && !hasFailedViva && !hasUnresolvedFlag;
+  const baseUrl = typeof window !== 'undefined' ? (import.meta.env.VITE_APP_URL || window.location.origin) : '';
+  const verifyUrl = myCert ? `${baseUrl}/verify/${myCert.certificateId}` : '';
+
+  const handleCopyLink = () => {
+    if (!verifyUrl) return;
+    navigator.clipboard.writeText(verifyUrl);
+    setCopiedLink(true);
+    setTimeout(() => setCopiedLink(false), 2000);
+  };
 
   return (
     <div className="min-h-screen bg-[#FCF9F2] dark:bg-[#0F1115] transition-colors py-10 px-4 sm:px-6 lg:px-8 pb-24">
@@ -68,112 +74,159 @@ export const MyCertificatePage = ({ setCurrentTab }) => {
             My Technova Certificate
           </h1>
           <p className="text-sm text-[#6b6375] dark:text-[#94a3b8] mt-1">
-            Issued by Technical Skill Development Hub, Sir Visvesvaraya Institute of Technology, Nashik
+            Technical Skill Development Hub • Sir Visvesvaraya Institute of Technology, Nashik
           </p>
         </div>
 
-        {myCert ? (
-          /* ISSUED CERTIFICATE DISPLAY */
+        {/* Score & Status Pill */}
+        <div className="max-w-xl mx-auto mb-6 p-4 rounded-2xl bg-white dark:bg-[#181B20] border border-[#E8DEC8] dark:border-[#2E3440] shadow-xs flex items-center justify-between">
+          <div>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Total Score</span>
+            <div className="text-xl font-mono font-black text-[#B3122B] dark:text-[#ff8a9e]">
+              {formatScore(summary.totalScore)} / 100 points
+            </div>
+          </div>
+          <div className="text-right">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Pass Mark: 50 Pts</span>
+            <div className="text-xs font-bold mt-0.5">
+              {summary.progressStatus === 'Passed' && <span className="text-emerald-600 dark:text-emerald-400">✓ Passed</span>}
+              {summary.progressStatus === 'Pending review' && <span className="text-orange-600 dark:text-orange-400">⏳ Pending Review</span>}
+              {summary.progressStatus === 'Below pass mark' && <span className="text-amber-600 dark:text-amber-400">Below Pass Mark</span>}
+              {summary.progressStatus === 'Pass mark not reached' && <span className="text-red-600 dark:text-red-400">Pass Mark Not Reached</span>}
+              {summary.progressStatus === 'On track' && <span className="text-blue-600 dark:text-blue-400">On Track</span>}
+            </div>
+          </div>
+        </div>
+
+        {myCert && eligibility.isEligible ? (
+          /* ISSUED CERTIFICATE DISPLAY (Section 3 & 4) */
           <div className="space-y-6">
-            <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/25 flex items-center justify-between text-xs text-emerald-800 dark:text-emerald-300">
+            
+            {/* Verification Link Banner */}
+            <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/25 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-emerald-800 dark:text-emerald-300">
               <div className="flex items-center gap-2.5 font-bold">
-                <CheckCircle2 className="w-5 h-5 text-emerald-600" />
-                <span>Certificate Issued & Authenticated: {myCert.certificateId}</span>
+                <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+                <span>Certificate Authenticated: <strong className="font-mono">{myCert.certificateId}</strong></span>
               </div>
-              <span className="text-gray-500">Issued on {myCert.issuedDate}</span>
+
+              <div className="flex items-center gap-2 w-full sm:w-auto">
+                <span className="font-mono text-[11px] bg-white dark:bg-[#181B20] px-2 py-1 rounded border border-emerald-500/30 truncate max-w-xs">
+                  {verifyUrl}
+                </span>
+                <button
+                  onClick={handleCopyLink}
+                  className="px-2.5 py-1 rounded bg-emerald-600 text-white font-bold text-[11px] hover:bg-emerald-700 transition-colors flex items-center gap-1 cursor-pointer"
+                >
+                  <Copy className="w-3 h-3" />
+                  <span>{copiedLink ? "Copied!" : "Copy Link"}</span>
+                </button>
+              </div>
             </div>
 
             <CertificateView
               studentName={myCert.studentName || user.name}
               prn={myCert.prn || user.prn}
-              track={myCert.track || user.track}
+              language={myCert.language || user.language || user.track || 'Python'}
+              track={myCert.language || user.language || user.track || 'Python'}
+              score={myCert.score || summary.totalScore}
               certificateId={myCert.certificateId}
-              startDate={myCert.startDate || "1st October 2026"}
-              endDate={myCert.endDate || "9th October 2026"}
-              issueDate={myCert.issuedDate || "10th October 2026"}
+              startDate={myCert.startDate || "13 Oct 2026"}
+              endDate={myCert.endDate || "21 Oct 2026"}
+              issueDate={myCert.issuedDate || "22 Oct 2026"}
               showDownloadButton={true}
             />
           </div>
-        ) : isEligible ? (
-          /* ELIGIBLE BUT PENDING ADMIN RELEASE */
+        ) : summary.hasPendingReview || eligibility.hasUnresolvedFlag ? (
+          /* PENDING REVIEW (Section 2) */
+          <div className="bg-white dark:bg-[#181B20] rounded-3xl p-8 border border-orange-500/30 shadow-sm text-center max-w-xl mx-auto">
+            <div className="w-16 h-16 rounded-full bg-orange-500/10 text-orange-600 flex items-center justify-center mx-auto mb-4">
+              <ShieldAlert className="w-8 h-8" />
+            </div>
+            <h2 className="text-xl font-bold text-[#1A1A1A] dark:text-white">
+              Status: Pending Review
+            </h2>
+            <p className="text-xs text-gray-600 dark:text-gray-300 mt-2 leading-relaxed">
+              Your submissions have reached <strong>{formatScore(summary.totalScore)} / 100 points</strong>, but an integrity flag has been marked by faculty for viva audit.
+            </p>
+            <div className="mt-5 p-4 rounded-2xl bg-orange-500/5 border border-orange-500/20 text-xs text-left">
+              <div className="font-bold text-orange-800 dark:text-orange-300">Next Step: 2-Minute Faculty Viva</div>
+              <p className="text-gray-600 dark:text-gray-400 mt-1 leading-relaxed">
+                Connect with the faculty mentor at the Hub. Once your viva is conducted and cleared, your status will change to "Passed" and your certificate will be released immediately.
+              </p>
+            </div>
+            <button
+              onClick={() => setCurrentTab('dashboard')}
+              className="mt-6 px-6 py-2.5 rounded-xl font-bold bg-[#B3122B] text-white text-xs cursor-pointer"
+            >
+              Return to Dashboard
+            </button>
+          </div>
+        ) : summary.totalScore >= 50 ? (
+          /* PASSED BUT CERTIFICATE BEING GENERATED */
           <div className="bg-white dark:bg-[#181B20] rounded-3xl p-8 border border-[#E8DEC8] dark:border-[#2E3440] shadow-sm text-center max-w-xl mx-auto">
             <div className="w-16 h-16 rounded-full bg-emerald-500/10 text-emerald-600 flex items-center justify-center mx-auto mb-4">
               <FileCheck2 className="w-8 h-8" />
             </div>
             <h2 className="text-xl font-bold text-[#1A1A1A] dark:text-white">
-              Congratulations! You are Eligible for Certification 🎉
+              Congratulations! You Passed the Code Sprint! 🎉
             </h2>
             <p className="text-xs text-gray-500 mt-2 leading-relaxed">
-              You have completed all 9 days of challenges with clean academic integrity.
-              Faculty mentors are currently auditing final submissions and generating official digitally signed certificates.
+              You scored <strong>{formatScore(summary.totalScore)} / 100 points</strong> (pass mark is 50). Your official certificate is queued for cryptographic release by the Technical Skill Development Hub.
             </p>
-
             <div className="mt-6 p-4 rounded-2xl bg-[#FCF9F2] dark:bg-[#111317] border border-[#E8DEC8] dark:border-[#2E3440] text-xs text-left space-y-2">
               <div className="flex items-center justify-between">
-                <span className="text-gray-500">Days Solved:</span>
-                <span className="font-bold text-emerald-600">9 / 9 Days (Complete)</span>
+                <span className="text-gray-500">Student:</span>
+                <span className="font-bold">{user.name} ({user.prn})</span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-gray-500">Integrity Status:</span>
-                <span className="font-bold text-emerald-600">Verified & Clean</span>
+                <span className="text-gray-500">Language Track:</span>
+                <span className="font-bold">{user.language || user.track || 'Python'}</span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-gray-500">Assigned Track:</span>
-                <span className="font-bold">{user.track} Track</span>
+                <span className="text-gray-500">Total Score:</span>
+                <span className="font-bold text-emerald-600">{formatScore(summary.totalScore)} / 100 pts</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-gray-500">Status:</span>
+                <span className="font-bold text-emerald-600">Passed (Pass Mark: 50)</span>
               </div>
             </div>
-
-            <p className="text-[11px] text-gray-400 mt-4">
-              You will receive an email from <strong>technicalteamsvit@gmail.com</strong> once your PDF is released.
-            </p>
           </div>
         ) : (
-          /* NOT YET ELIGIBLE: PROGRESS CHECKLIST */
-          <div className="bg-white dark:bg-[#181B20] rounded-3xl p-8 border border-[#E8DEC8] dark:border-[#2E3440] shadow-sm max-w-xl mx-auto">
-            <div className="text-center mb-6">
-              <div className="w-16 h-16 rounded-full bg-amber-500/10 text-amber-600 flex items-center justify-center mx-auto mb-3">
-                <Lock className="w-8 h-8" />
-              </div>
-              <h2 className="text-xl font-bold text-[#1A1A1A] dark:text-white">
-                Certificate Locked ({completedDays.size} / 9 Days Completed)
-              </h2>
-              <p className="text-xs text-gray-500 mt-1">
-                Complete all 9 days of coding challenges to qualify for the official SVIT certificate.
-              </p>
+          /* BELOW PASS MARK (< 50) */
+          <div className="bg-white dark:bg-[#181B20] rounded-3xl p-8 border border-[#E8DEC8] dark:border-[#2E3440] shadow-sm max-w-xl mx-auto text-center">
+            <div className="w-16 h-16 rounded-full bg-amber-500/10 text-amber-600 flex items-center justify-center mx-auto mb-3">
+              <Lock className="w-8 h-8" />
             </div>
+            <h2 className="text-xl font-bold text-[#1A1A1A] dark:text-white">
+              Certificate Locked: {formatScore(summary.totalScore)} / 100 Points
+            </h2>
+            <p className="text-xs text-gray-500 mt-1 max-w-md mx-auto leading-relaxed">
+              To pass and qualify for certification, students must score <strong>50 or more points</strong> out of 100. Completing all 9 days is not required.
+            </p>
 
-            {/* Checklist */}
-            <div className="space-y-3 text-xs mb-6">
-              <div className="p-3.5 rounded-xl border border-[#E8DEC8] dark:border-[#2E3440] flex items-center justify-between">
-                <div>
-                  <div className="font-bold text-[#1A1A1A] dark:text-white">Complete all 9 Sprint Days</div>
-                  <div className="text-gray-500">Catch-up days count towards eligibility!</div>
-                </div>
-                <span className={`px-2 py-0.5 rounded font-bold text-[11px] ${
-                  completedDays.size === 9 ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-600'
-                }`}>
-                  {completedDays.size} / 9 Days
-                </span>
+            <div className="my-6 p-4 rounded-2xl bg-[#FCF9F2] dark:bg-[#111317] border border-[#E8DEC8] dark:border-[#2E3440] text-xs text-left space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-gray-500">Current Score:</span>
+                <span className="font-mono font-bold text-[#B3122B]">{formatScore(summary.totalScore)} / 100</span>
               </div>
-
-              <div className="p-3.5 rounded-xl border border-[#E8DEC8] dark:border-[#2E3440] flex items-center justify-between">
-                <div>
-                  <div className="font-bold text-[#1A1A1A] dark:text-white">No Unresolved Flags or Failed Vivas</div>
-                  <div className="text-gray-500">Pass viva explanation if flagged by faculty.</div>
-                </div>
-                <span className={`px-2 py-0.5 rounded font-bold text-[11px] ${
-                  !hasFailedViva && !hasUnresolvedFlag ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'
-                }`}>
-                  {!hasFailedViva && !hasUnresolvedFlag ? 'Passed' : 'Pending Review'}
+              <div className="flex items-center justify-between">
+                <span className="text-gray-500">Pass Mark Required:</span>
+                <span className="font-mono font-bold text-emerald-600">50.0 / 100</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-gray-500">Points Needed:</span>
+                <span className="font-mono font-bold text-amber-600">
+                  {formatScore(Math.max(0, 50 - summary.totalScore))} pts
                 </span>
               </div>
             </div>
 
             <button
               onClick={() => setCurrentTab('dashboard')}
-              className="w-full py-3 rounded-xl font-bold bg-[#B3122B] text-white hover:bg-[#8B0D20] text-xs flex items-center justify-center gap-2"
+              className="w-full py-3 rounded-xl font-bold bg-[#B3122B] text-white hover:bg-[#8B0D20] text-xs flex items-center justify-center gap-2 cursor-pointer"
             >
-              <span>Continue Building on Dashboard</span>
+              <span>Solve Tasks & Catch Up (Earn 50% on Missed Days)</span>
               <ArrowRight className="w-4 h-4" />
             </button>
           </div>

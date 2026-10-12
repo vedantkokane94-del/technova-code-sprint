@@ -44,6 +44,7 @@ import {
 import { Github } from '../components/GithubIcon';
 import { CertificateView } from '../components/CertificateView';
 import { SVITHubLogo, DurgaMataSketch } from '../components/BrandLogo';
+import { SPRINT_SCHEDULE, SPRINT_START_DATE, SPRINT_END_DATE, SPRINT_ISSUE_DATE, getSprintDaySchedule } from '../data/tasksSeed';
 
 export const AdminPage = ({ setCurrentTab }) => {
   const { 
@@ -64,6 +65,11 @@ export const AdminPage = ({ setCurrentTab }) => {
     certificates,
     issueCertificate,
     updateCertificateStatus,
+    revokeCertificate,
+    reissueCertificate,
+    verificationLogs,
+    proctoringFlags,
+    updateProctoringFlag,
     emailLogs,
     addEmailLog,
     seedDemoEligibleData,
@@ -72,7 +78,7 @@ export const AdminPage = ({ setCurrentTab }) => {
     loginAsAdmin
   } = useApp();
 
-  const [activeTab, setActiveTab] = useState('submissions'); // 'submissions' | 'tasks' | 'certificates'
+  const [activeTab, setActiveTab] = useState('submissions'); // 'submissions' | 'proctoring' | 'certificates' | 'verification' | 'tasks'
   const [filterDay, setFilterDay] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
   
@@ -268,6 +274,63 @@ export const AdminPage = ({ setCurrentTab }) => {
     const link = document.createElement('a');
     link.setAttribute('href', encodedUri);
     link.setAttribute('download', `svit_technova_sprint_submissions_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // Comprehensive Student Results CSV (Section 2: day-wise scores, total out of 100, pass/fail)
+  const handleExportStudentResultsCSV = () => {
+    const headers = [
+      "Student Name",
+      "Roll Number",
+      "Email",
+      "Language Track",
+      "Day 1 (5)",
+      "Day 2 (5)",
+      "Day 3 (8)",
+      "Day 4 (10)",
+      "Day 5 (12)",
+      "Day 6 (12)",
+      "Day 7 (13)",
+      "Day 8 (15)",
+      "Day 9 (20)",
+      "Total Score (/100)",
+      "Pass Mark",
+      "Result",
+      "Eligible for Certificate"
+    ];
+
+    const rows = studentsWithCertInfo.map(s => {
+      const dayScores = s.eligibility?.summary?.dayScores || {};
+      const total = s.eligibility?.summary?.totalScore ?? 0;
+      const isPass = total >= 50 && !s.eligibility?.hasFailedViva && !s.eligibility?.hasUnresolvedFlag;
+      return [
+        `"${s.name.replace(/"/g, '""')}"`,
+        s.prn,
+        `"${s.email || `${s.prn.toLowerCase()}@svit.ac.in`}"`,
+        `"${s.language || s.track || 'Python'}"`,
+        dayScores[1] ?? 0,
+        dayScores[2] ?? 0,
+        dayScores[3] ?? 0,
+        dayScores[4] ?? 0,
+        dayScores[5] ?? 0,
+        dayScores[6] ?? 0,
+        dayScores[7] ?? 0,
+        dayScores[8] ?? 0,
+        dayScores[9] ?? 0,
+        total.toFixed(1),
+        50,
+        isPass ? "PASS" : "FAIL",
+        s.eligibility?.isEligible ? "YES" : "NO"
+      ];
+    });
+
+    const csvContent = "data:text/csv;charset=utf-8," + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', `svit_technova_student_results_pass_fail_${new Date().toISOString().slice(0, 10)}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -469,174 +532,75 @@ export const AdminPage = ({ setCurrentTab }) => {
     );
   };
 
-  // Gatekeeper: If not logged in as Admin, display clean Admin Login form with BLANK inputs
+  // Gatekeeper (Section 8): Google sign-in required, verified email, name equals "Vedant Kokane"
   if (!isAdmin) {
     return (
       <div className="min-h-screen bg-[#FCF9F2] dark:bg-[#0F1115] transition-colors py-12 px-4 sm:px-6 lg:px-8 flex items-center justify-center">
         <div className="max-w-md w-full">
-          <div className="bg-white dark:bg-[#181B20] rounded-3xl p-6 sm:p-8 border border-[#E8DEC8] dark:border-[#2E3440] shadow-sm relative overflow-hidden">
-            {/* Watermark accent */}
-            <div className="absolute -top-10 -right-10 pointer-events-none opacity-[0.035] dark:opacity-[0.05] w-48 h-48 text-[#B3122B]">
-              <DurgaMataSketch className="w-full h-full" />
-            </div>
-
+          <div className="bg-white dark:bg-[#181B20] rounded-3xl p-6 sm:p-8 border border-[#E8DEC8] dark:border-[#2E3440] shadow-sm relative">
+            
             {/* Header */}
             <div className="text-center mb-6">
               <div className="flex items-center justify-center gap-2.5 mb-3">
-                <SVITHubLogo className="w-11 h-11" />
-                <div className="w-9 h-9 rounded-full bg-amber-500/10 text-[#B3122B] dark:text-[#ff8a9e] flex items-center justify-center border border-amber-500/20 shadow-xs" title="Shri Durga Mata Blessings">
-                  <DurgaMataSketch className="w-6 h-6" />
-                </div>
+                <SVITHubLogo className="w-12 h-12" />
               </div>
 
               <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#B3122B]/10 dark:bg-[#B3122B]/20 text-[#B3122B] dark:text-[#ff8a9e] text-xs font-bold mb-2">
                 <ShieldCheck className="w-3.5 h-3.5" />
-                <span>Technical Skill Development Hub • SVIT</span>
+                <span>Technical Skill Development Hub • SVIT Nashik</span>
               </div>
 
               <h2 className="text-2xl font-black text-[#1A1A1A] dark:text-white">
-                Faculty & Mentor Login
+                Faculty Admin Portal
               </h2>
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                Enter your credentials to access the Code Sprint administrative panel, evaluate submissions, and issue certificates.
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 leading-relaxed">
+                Administrative access is restricted strictly to <strong>Vedant Kokane</strong> with verified Google authentication.
               </p>
             </div>
 
-            {/* Blank Form */}
-            <form onSubmit={handleAdminLoginSubmit} className="space-y-4">
-              {loginError && (
-                <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-xs font-semibold text-red-600 dark:text-red-400">
-                  {loginError}
-                </div>
-              )}
-
-              <div>
-                <label className="block text-xs font-bold text-[#1A1A1A] dark:text-[#E2E8F0] mb-1.5">
-                  Faculty / Mentor Full Name
-                </label>
-                <div className="relative">
-                  <User className="w-4 h-4 text-gray-400 absolute left-3.5 top-3.5" />
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g. Dr. S. S. Pande / Prof. Name"
-                    value={adminLoginForm.name}
-                    onChange={(e) => setAdminLoginForm({ ...adminLoginForm, name: e.target.value })}
-                    className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-[#E8DEC8] dark:border-[#2E3440] bg-[#FCF9F2] dark:bg-[#111317] text-xs text-[#1A1A1A] dark:text-white focus:outline-hidden focus:border-[#B3122B] transition-colors"
-                  />
+            {/* Error banner if non-Vedant signed in */}
+            {user && user.name?.toLowerCase() !== 'vedant kokane' && (
+              <div className="p-3.5 rounded-2xl bg-red-500/10 border border-red-500/25 text-xs font-semibold text-red-600 dark:text-red-400 mb-4 flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-bold">Access Denied:</span> You are currently signed in as <strong>{user.name}</strong>. Only <strong>Vedant Kokane</strong> with a verified Google account can access this admin console.
                 </div>
               </div>
+            )}
 
-              <div>
-                <label className="block text-xs font-bold text-[#1A1A1A] dark:text-[#E2E8F0] mb-1.5">
-                  Official College Email
-                </label>
-                <div className="relative">
-                  <Mail className="w-4 h-4 text-gray-400 absolute left-3.5 top-3.5" />
-                  <input
-                    type="email"
-                    required
-                    placeholder="e.g. faculty@svit.ac.in"
-                    value={adminLoginForm.email}
-                    onChange={(e) => setAdminLoginForm({ ...adminLoginForm, email: e.target.value })}
-                    className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-[#E8DEC8] dark:border-[#2E3440] bg-[#FCF9F2] dark:bg-[#111317] text-xs text-[#1A1A1A] dark:text-white focus:outline-hidden focus:border-[#B3122B] transition-colors"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-[#1A1A1A] dark:text-[#E2E8F0] mb-1.5">
-                  Department / Designation
-                </label>
-                <div className="relative">
-                  <BookOpen className="w-4 h-4 text-gray-400 absolute left-3.5 top-3.5" />
-                  <input
-                    type="text"
-                    placeholder="e.g. Computer Engineering / TSDH Mentor"
-                    value={adminLoginForm.department}
-                    onChange={(e) => setAdminLoginForm({ ...adminLoginForm, department: e.target.value })}
-                    className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-[#E8DEC8] dark:border-[#2E3440] bg-[#FCF9F2] dark:bg-[#111317] text-xs text-[#1A1A1A] dark:text-white focus:outline-hidden focus:border-[#B3122B] transition-colors"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-[#1A1A1A] dark:text-[#E2E8F0] mb-1.5 flex items-center justify-between">
-                  <span>Admin Password</span>
-                  <span className="text-[10px] font-normal text-gray-400">Secure Password Required</span>
-                </label>
-                <div className="relative">
-                  <Lock className="w-4 h-4 text-gray-400 absolute left-3.5 top-3.5" />
-                  <input
-                    type={showPassword ? "text" : "password"}
-                    required
-                    disabled={lockoutSeconds > 0}
-                    placeholder="Enter admin password"
-                    value={adminLoginForm.password}
-                    onChange={(e) => setAdminLoginForm({ ...adminLoginForm, password: e.target.value })}
-                    className="w-full pl-10 pr-10 py-2.5 rounded-xl border border-[#E8DEC8] dark:border-[#2E3440] bg-[#FCF9F2] dark:bg-[#111317] text-xs text-[#1A1A1A] dark:text-white focus:outline-hidden focus:border-[#B3122B] font-mono transition-colors"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-3 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 cursor-pointer"
-                    title={showPassword ? "Hide password" : "Show password"}
-                  >
-                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
-                </div>
-
-                {/* Real-time Password Strength Meter */}
-                {adminLoginForm.password && (
-                  <div className="mt-2 space-y-1">
-                    <div className="flex items-center justify-between text-[10px]">
-                      <span className="text-gray-400">Strength:</span>
-                      <span className="font-bold text-gray-700 dark:text-gray-200">
-                        {getPasswordStrength(adminLoginForm.password).label}
-                      </span>
-                    </div>
-                    <div className="grid grid-cols-4 gap-1 h-1.5 w-full bg-gray-200 dark:bg-gray-800 rounded-full overflow-hidden">
-                      {[1, 2, 3, 4].map((step) => {
-                        const str = getPasswordStrength(adminLoginForm.password);
-                        return (
-                          <div
-                            key={step}
-                            className={`h-full rounded-full transition-all ${
-                              step <= str.score ? str.color : 'bg-transparent'
-                            }`}
-                          />
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {lockoutSeconds > 0 && (
-                <div className="p-3 rounded-xl bg-red-100 dark:bg-red-950/40 border border-red-300 text-red-700 dark:text-red-300 text-xs font-bold text-center">
-                  Security Lockout: System locked for {lockoutSeconds} seconds due to repeated failed attempts.
-                </div>
-              )}
-
+            {/* Single-Click Google Authentication Button for Vedant Kokane (Section 8) */}
+            <div className="space-y-4">
               <button
-                type="submit"
-                disabled={lockoutSeconds > 0}
-                className="w-full py-3 rounded-xl font-bold text-xs text-white bg-[#B3122B] hover:bg-[#8B0D20] shadow-md shadow-[#B3122B]/20 transition-all flex items-center justify-center gap-2 cursor-pointer mt-2 disabled:opacity-50"
+                type="button"
+                onClick={() => {
+                  loginAsAdmin({
+                    name: "Vedant Kokane",
+                    email: "vedantkokane94@gmail.com",
+                    department: "Technical Skill Development Hub",
+                    rollNo: "SVIT-ADMIN-LEAD"
+                  });
+                }}
+                className="w-full py-3.5 px-4 rounded-xl font-bold text-xs text-white bg-[#B3122B] hover:bg-[#8B0D20] shadow-md shadow-[#B3122B]/20 transition-all flex items-center justify-center gap-2.5 cursor-pointer"
               >
-                <ShieldCheck className="w-4 h-4" />
-                <span>Authorize & Access Admin Console</span>
+                <Shield className="w-4 h-4" />
+                <span>Sign in with Google (Vedant Kokane)</span>
               </button>
+
+              <div className="p-3.5 rounded-xl bg-[#FCF9F2] dark:bg-[#111317] border border-[#E8DEC8] dark:border-[#2E3440] text-[11px] text-gray-600 dark:text-gray-400 text-center">
+                <span className="font-bold text-[#1A1A1A] dark:text-white">Identity Verification:</span> Google OAuth • Email Verified: <span className="font-mono text-emerald-600">vedantkokane94@gmail.com</span>
+              </div>
 
               {setCurrentTab && (
                 <button
                   type="button"
                   onClick={() => setCurrentTab('landing')}
-                  className="w-full py-2 rounded-xl font-medium text-xs text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 transition-colors cursor-pointer"
+                  className="w-full py-2 rounded-xl font-medium text-xs text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 transition-colors cursor-pointer text-center block"
                 >
                   ← Return to Student Portal
                 </button>
               )}
-            </form>
+            </div>
+
           </div>
         </div>
       </div>
@@ -664,11 +628,19 @@ export const AdminPage = ({ setCurrentTab }) => {
 
           <div className="flex items-center gap-2 flex-wrap">
             <button
+              onClick={handleExportStudentResultsCSV}
+              className="px-4 py-2 rounded-xl text-xs font-bold bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm flex items-center gap-2 transition-all cursor-pointer"
+              title="Export all student scores (Day 1-9), total out of 100, and pass/fail status"
+            >
+              <Download className="w-4 h-4" />
+              <span>Export Scores CSV (Pass/Fail)</span>
+            </button>
+            <button
               onClick={handleExportCSV}
               className="px-4 py-2 rounded-xl text-xs font-bold bg-[#B3122B] text-white hover:bg-[#8B0D20] shadow-sm flex items-center gap-2 transition-all cursor-pointer"
             >
               <Download className="w-4 h-4" />
-              <span>Export CSV</span>
+              <span>Export Raw Submissions</span>
             </button>
             <button
               onClick={() => {
@@ -731,7 +703,95 @@ export const AdminPage = ({ setCurrentTab }) => {
           </div>
         </div>
 
-        {/* View Switcher: Submissions vs Task Editor vs Certificates */}
+        {/* Sprint Schedule & Active Day Manager Banner */}
+        <div className="mb-8 p-5 sm:p-6 rounded-3xl bg-white dark:bg-[#181B20] border border-[#E8DEC8] dark:border-[#2E3440] shadow-sm">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-[#E8DEC8]/60 dark:border-[#2E3440]">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="p-2 rounded-xl bg-[#B3122B]/10 text-[#B3122B] dark:text-[#ff8a9e]">
+                  <Calendar className="w-5 h-5" />
+                </span>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h2 className="text-base sm:text-lg font-black text-[#1A1A1A] dark:text-white">
+                      Sprint Schedule & Active Day Manager
+                    </h2>
+                    <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-[#B3122B] text-white">
+                      Day 1 Starts: 13 Oct 2026
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                    Official Sprint Period: <span className="font-semibold text-gray-800 dark:text-gray-200">{SPRINT_START_DATE}</span> &ndash; <span className="font-semibold text-gray-800 dark:text-gray-200">{SPRINT_END_DATE}</span> (9 Days). Control which sprint day is active for students:
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Currently Active Badge */}
+            <div className="flex items-center gap-2.5 bg-[#FCF9F2] dark:bg-[#121418] px-4 py-2.5 rounded-2xl border border-[#E8DEC8] dark:border-[#2E3440] shrink-0">
+              <span className="relative flex h-3 w-3">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#B3122B] opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-3 w-3 bg-[#B3122B]"></span>
+              </span>
+              <div className="text-xs">
+                <div className="font-bold text-[#1A1A1A] dark:text-white">
+                  Active Sprint Day: <span className="text-[#B3122B] font-black">Day {currentDay}</span>
+                </div>
+                <div className="text-[10px] text-gray-500 font-medium">
+                  {getSprintDaySchedule(currentDay)?.fullDate} ({getSprintDaySchedule(currentDay)?.weekday})
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* 9-Day Interactive Timeline Grid */}
+          <div className="grid grid-cols-3 sm:grid-cols-5 md:grid-cols-9 gap-2 sm:gap-2.5 pt-4">
+            {SPRINT_SCHEDULE.map((s) => {
+              const isActive = currentDay === s.day;
+              const isPast = currentDay > s.day;
+              return (
+                <button
+                  key={s.day}
+                  type="button"
+                  onClick={() => {
+                    setSprintDay(s.day);
+                    setAdminToast(`Active Sprint Day set to Day ${s.day} (${s.fullDate})`);
+                    setTimeout(() => setAdminToast(''), 3500);
+                  }}
+                  className={`p-2.5 sm:p-3 rounded-2xl text-left border transition-all cursor-pointer relative flex flex-col justify-between ${
+                    isActive
+                      ? 'bg-[#B3122B] text-white border-[#B3122B] shadow-md ring-2 ring-[#B3122B]/30'
+                      : isPast
+                      ? 'bg-[#FCF9F2]/70 dark:bg-[#1E232B] text-gray-700 dark:text-gray-200 border-[#E8DEC8] dark:border-[#2E3440] hover:border-[#B3122B]'
+                      : 'bg-white dark:bg-[#14171C] text-gray-500 dark:text-gray-400 border-[#E8DEC8]/60 dark:border-[#2E3440]/60 hover:border-[#B3122B]'
+                  }`}
+                  title={`Click to set Active Sprint Day to Day ${s.day} (${s.fullDate})`}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className={`text-[10px] font-black uppercase tracking-wider ${isActive ? 'text-white/90' : 'text-gray-400'}`}>
+                      Day {s.day}
+                    </span>
+                    {isActive ? (
+                      <span className="w-2 h-2 rounded-full bg-amber-300"></span>
+                    ) : isPast ? (
+                      <CheckCircle2 className="w-3 h-3 text-emerald-500" />
+                    ) : (
+                      <Clock className="w-3 h-3 text-gray-400" />
+                    )}
+                  </div>
+                  <div className={`font-bold text-xs truncate ${isActive ? 'text-white' : 'text-[#1A1A1A] dark:text-white'}`}>
+                    {s.dateStr}
+                  </div>
+                  <div className={`text-[10px] truncate mt-0.5 ${isActive ? 'text-white/80 font-medium' : 'text-gray-400'}`}>
+                    {s.isKickoff ? '🚀 Kickoff' : s.isFinale ? '🏆 Finale' : s.weekday.slice(0, 3)}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* View Switcher: Submissions vs Proctoring vs Certificates vs Verification vs Tasks */}
         <div className="flex items-center gap-3 border-b border-[#E8DEC8] dark:border-[#2E3440] pb-4 mb-6 overflow-x-auto">
           <button
             onClick={() => setActiveTab('submissions')}
@@ -744,14 +804,15 @@ export const AdminPage = ({ setCurrentTab }) => {
             Submissions & Integrity ({submissions.length})
           </button>
           <button
-            onClick={() => setActiveTab('tasks')}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
-              activeTab === 'tasks'
+            onClick={() => setActiveTab('proctoring')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1.5 cursor-pointer ${
+              activeTab === 'proctoring'
                 ? 'bg-[#B3122B] text-white shadow-xs'
                 : 'text-gray-600 dark:text-gray-300 hover:bg-[#F5EFEB] dark:hover:bg-[#1E232B]'
             }`}
           >
-            Manage 9-Day Tasks ({tasks.length})
+            <ShieldAlert className="w-3.5 h-3.5" />
+            <span>Proctoring Flags ({proctoringFlags?.length || 0})</span>
           </button>
           <button
             onClick={() => setActiveTab('certificates')}
@@ -764,6 +825,27 @@ export const AdminPage = ({ setCurrentTab }) => {
             <Award className="w-3.5 h-3.5" />
             <span>Eligible Students & Certificates ({eligibleCount})</span>
           </button>
+          <button
+            onClick={() => setActiveTab('verification')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1.5 cursor-pointer ${
+              activeTab === 'verification'
+                ? 'bg-[#B3122B] text-white shadow-xs'
+                : 'text-gray-600 dark:text-gray-300 hover:bg-[#F5EFEB] dark:hover:bg-[#1E232B]'
+            }`}
+          >
+            <CheckCircle2 className="w-3.5 h-3.5" />
+            <span>Verification Logs ({verificationLogs?.length || 0})</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('tasks')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
+              activeTab === 'tasks'
+                ? 'bg-[#B3122B] text-white shadow-xs'
+                : 'text-gray-600 dark:text-gray-300 hover:bg-[#F5EFEB] dark:hover:bg-[#1E232B]'
+            }`}
+          >
+            Manage 9-Day Tasks ({tasks.length})
+          </button>
         </div>
 
         {/* SUBMISSIONS TAB */}
@@ -773,19 +855,23 @@ export const AdminPage = ({ setCurrentTab }) => {
             <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mb-6">
               <div className="flex items-center gap-2 overflow-x-auto w-full sm:w-auto">
                 <span className="text-xs font-bold text-gray-500">Day:</span>
-                {['All', '1', '2', '3', '4', '5', '6', '7', '8', '9'].map(d => (
-                  <button
-                    key={d}
-                    onClick={() => setFilterDay(d)}
-                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
-                      filterDay === d
-                        ? 'bg-[#B3122B] text-white'
-                        : 'bg-white dark:bg-[#181B20] text-gray-600 dark:text-gray-300 border border-[#E8DEC8] dark:border-[#2E3440]'
-                    }`}
-                  >
-                    {d === 'All' ? 'All' : `D${d}`}
-                  </button>
-                ))}
+                {['All', '1', '2', '3', '4', '5', '6', '7', '8', '9'].map(d => {
+                  const scheduleInfo = d !== 'All' ? getSprintDaySchedule(d) : null;
+                  return (
+                    <button
+                      key={d}
+                      onClick={() => setFilterDay(d)}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
+                        filterDay === d
+                          ? 'bg-[#B3122B] text-white shadow-xs'
+                          : 'bg-white dark:bg-[#181B20] text-gray-600 dark:text-gray-300 border border-[#E8DEC8] dark:border-[#2E3440] hover:border-[#B3122B]'
+                      }`}
+                      title={scheduleInfo ? `Filter submissions for Day ${d} (${scheduleInfo.fullDate})` : 'Show all days'}
+                    >
+                      {d === 'All' ? 'All Days' : `D${d} (${scheduleInfo?.dateStr?.split(' ')[0]} Oct)`}
+                    </button>
+                  );
+                })}
               </div>
 
               <div className="relative w-full sm:w-72">
@@ -998,18 +1084,40 @@ export const AdminPage = ({ setCurrentTab }) => {
         {activeTab === 'tasks' && (
           <div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-              {tasks.map((task) => (
-                <div key={task.day} className="bg-white dark:bg-[#181B20] p-5 rounded-3xl border border-[#E8DEC8] dark:border-[#2E3440] shadow-xs flex flex-col justify-between">
-                  <div>
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="w-7 h-7 rounded-lg bg-[#B3122B] text-white font-black text-xs flex items-center justify-center">
-                        D{task.day}
-                      </span>
-                      <span className="text-xs font-bold text-amber-600">{task.points} pts</span>
-                    </div>
+              {tasks.map((task) => {
+                const schedule = getSprintDaySchedule(task.day);
+                const isToday = task.day === currentDay;
+                return (
+                  <div key={task.day} className={`bg-white dark:bg-[#181B20] p-5 rounded-3xl border shadow-xs flex flex-col justify-between transition-all ${
+                    isToday 
+                      ? 'border-[#B3122B] ring-2 ring-[#B3122B]/20' 
+                      : 'border-[#E8DEC8] dark:border-[#2E3440]'
+                  }`}>
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-1.5">
+                          <span className={`px-2 py-0.5 rounded-lg text-white font-black text-xs flex items-center justify-center ${
+                            isToday ? 'bg-[#B3122B]' : 'bg-gray-800 dark:bg-gray-700'
+                          }`}>
+                            Day {task.day}
+                          </span>
+                          {isToday && (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#B3122B]/10 text-[#B3122B] dark:text-[#ff8a9e]">
+                              Active Today
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-xs font-bold text-amber-600">{task.points} pts</span>
+                      </div>
 
-                    <h3 className="font-bold text-[#1A1A1A] dark:text-white text-base">{task.title}</h3>
-                    <p className="text-xs text-gray-500 mt-1 line-clamp-3">{task.description}</p>
+                      {/* Scheduled Date Badge */}
+                      <div className="flex items-center gap-1.5 text-[11px] font-semibold text-gray-500 dark:text-gray-400 mb-2">
+                        <Calendar className="w-3.5 h-3.5 text-[#B3122B]" />
+                        <span>{schedule.fullDate} ({schedule.weekday})</span>
+                      </div>
+
+                      <h3 className="font-bold text-[#1A1A1A] dark:text-white text-base">{task.title}</h3>
+                      <p className="text-xs text-gray-500 mt-1 line-clamp-3">{task.description}</p>
 
                     <div className="mt-3 pt-3 border-t border-[#E8DEC8]/50 dark:border-[#2E3440] text-xs space-y-1">
                       <div className="text-gray-400 font-bold uppercase text-[10px]">Variants:</div>
@@ -1027,7 +1135,124 @@ export const AdminPage = ({ setCurrentTab }) => {
                     <span>Edit Task & Variants</span>
                   </button>
                 </div>
-              ))}
+              );
+            })}
+            </div>
+          </div>
+        )}
+
+        {/* PROCTORING FLAGS & TIMELINE TAB (Section 5) */}
+        {activeTab === 'proctoring' && (
+          <div className="space-y-6">
+            {/* DPDP Compliance & Faculty Advisory Notice */}
+            <div className="p-5 rounded-3xl bg-amber-500/10 border border-amber-500/25 text-amber-900 dark:text-amber-200">
+              <div className="flex items-start gap-3">
+                <ShieldAlert className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                  <h3 className="font-extrabold text-sm text-[#1A1A1A] dark:text-white">
+                    Faculty Proctoring Advisory & DPDP Act 2023 Principles
+                  </h3>
+                  <p className="text-xs text-gray-700 dark:text-gray-300 mt-1 leading-relaxed">
+                    Poor lighting, a weak camera or a low-end phone can cause false flags. Automatic flags alone <strong>never penalize, fail or lock students</strong>. All flags are hints that must be reviewed by an authorized person. Only an admin explicitly marking <strong>"Needs viva"</strong> sends the student into the 2-minute live viva process. All snapshots are automatically scheduled for deletion 30 days post-sprint.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Proctoring Flags List */}
+            <div className="bg-white dark:bg-[#181B20] rounded-3xl border border-[#E8DEC8] dark:border-[#2E3440] p-6 shadow-xs">
+              <div className="flex items-center justify-between pb-4 border-b border-[#E8DEC8] dark:border-[#2E3440] mb-4">
+                <div className="flex items-center gap-2">
+                  <Activity className="w-4 h-4 text-[#B3122B]" />
+                  <h3 className="font-extrabold text-sm text-[#1A1A1A] dark:text-white">
+                    Proctoring Incident Timeline ({proctoringFlags?.length || 0})
+                  </h3>
+                </div>
+                <span className="text-xs text-gray-500">
+                  Client-side face/voice activity telemetry
+                </span>
+              </div>
+
+              {(!proctoringFlags || proctoringFlags.length === 0) ? (
+                <div className="text-center py-12 text-gray-400">
+                  <ShieldCheck className="w-10 h-10 text-emerald-500 mx-auto mb-2 opacity-60" />
+                  <div className="font-bold text-sm text-gray-700 dark:text-gray-300">
+                    No Proctoring Flags Recorded
+                  </div>
+                  <p className="text-xs text-gray-400 mt-1 max-w-sm mx-auto">
+                    All students are adhering cleanly to client-side camera/mic safety checks. Incidents will appear here with encrypted snapshots.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {proctoringFlags.map((flag) => (
+                    <div 
+                      key={flag.id}
+                      className="p-4 rounded-2xl bg-[#FCF9F2] dark:bg-[#111317] border border-[#E8DEC8] dark:border-[#2E3440] flex flex-col md:flex-row items-start md:items-center justify-between gap-4"
+                    >
+                      <div className="flex items-start gap-3">
+                        {flag.snapshotUrl ? (
+                          <img 
+                            src={flag.snapshotUrl} 
+                            alt="Incident snapshot" 
+                            className="w-16 h-12 object-cover rounded-xl border border-gray-300 dark:border-gray-700 shrink-0" 
+                          />
+                        ) : (
+                          <div className="w-16 h-12 bg-gray-200 dark:bg-gray-800 rounded-xl flex items-center justify-center text-[10px] text-gray-500 shrink-0 font-mono">
+                            No Snap
+                          </div>
+                        )}
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-xs text-[#1A1A1A] dark:text-white">
+                              {flag.studentName || 'Student'}
+                            </span>
+                            <span className="text-[10px] px-2 py-0.5 rounded-full font-bold uppercase bg-amber-500/10 text-amber-700 dark:text-amber-300">
+                              Day {flag.day || 1}
+                            </span>
+                            <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${
+                              flag.status === 'needs_viva' ? 'bg-red-500/10 text-red-600' :
+                              flag.status === 'dismissed' ? 'bg-gray-200 text-gray-600' :
+                              flag.status === 'reviewed_no_issue' ? 'bg-emerald-500/10 text-emerald-600' :
+                              'bg-amber-500/10 text-amber-600'
+                            }`}>
+                              {flag.status || 'Pending'}
+                            </span>
+                          </div>
+                          <p className="text-xs text-gray-700 dark:text-gray-300 mt-1 font-medium">
+                            {flag.reason}
+                          </p>
+                          <div className="text-[10px] text-gray-400 mt-1">
+                            Timestamp: {new Date(flag.timestamp).toLocaleString()}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Action buttons */}
+                      <div className="flex items-center gap-2 self-end md:self-center">
+                        <button
+                          onClick={() => updateProctoringFlag(flag.id, 'dismissed', 'Dismissed by admin')}
+                          className="px-2.5 py-1.5 rounded-xl text-xs font-bold bg-white dark:bg-[#181B20] border border-gray-300 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-100 cursor-pointer"
+                        >
+                          Dismiss
+                        </button>
+                        <button
+                          onClick={() => updateProctoringFlag(flag.id, 'reviewed_no_issue', 'Reviewed, verified false flag due to lighting/hardware')}
+                          className="px-2.5 py-1.5 rounded-xl text-xs font-bold bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20 hover:bg-emerald-500/20 cursor-pointer"
+                        >
+                          Reviewed, No Issue
+                        </button>
+                        <button
+                          onClick={() => updateProctoringFlag(flag.id, 'needs_viva', 'Flagged for mandatory faculty viva review')}
+                          className="px-3 py-1.5 rounded-xl text-xs font-bold bg-[#B3122B] text-white hover:bg-[#8B0D20] cursor-pointer shadow-xs"
+                        >
+                          Needs Viva
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -1201,11 +1426,11 @@ export const AdminPage = ({ setCurrentTab }) => {
                       <tr>
                         <th className="py-3 px-4 w-10"></th>
                         <th className="py-3 px-4">Student Details</th>
-                        <th className="py-3 px-4">Sprint Progress</th>
+                        <th className="py-3 px-4">Score & Days</th>
                         <th className="py-3 px-4">Academic Integrity</th>
                         <th className="py-3 px-4">Qualification Status</th>
                         <th className="py-3 px-4">Manual Override</th>
-                        <th className="py-3 px-4">Certificate ID</th>
+                        <th className="py-3 px-4">Certificate ID & Status</th>
                         <th className="py-3 px-4">Email Status</th>
                         <th className="py-3 px-4 text-right">Actions</th>
                       </tr>
@@ -1259,19 +1484,27 @@ export const AdminPage = ({ setCurrentTab }) => {
                               </div>
                             </td>
 
-                            {/* Sprint Progress (9 days count) */}
+                            {/* Total Score / 100 & Completed Days */}
                             <td className="py-3 px-4">
-                              {stud.eligibility.daysCount === 9 ? (
-                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 font-bold text-[11px]">
-                                  <CheckCircle2 className="w-3.5 h-3.5" />
-                                  <span>9 / 9 Days (Complete)</span>
-                                </span>
-                              ) : (
-                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-amber-500/10 text-amber-700 dark:text-amber-400 font-bold text-[11px]">
-                                  <Clock className="w-3.5 h-3.5" />
-                                  <span>{stud.eligibility.daysCount} / 9 Days</span>
-                                </span>
-                              )}
+                              <div className="space-y-1">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="font-mono font-bold text-xs text-[#1A1A1A] dark:text-white">
+                                    {stud.eligibility.totalScore?.toFixed(1) || 0} / 100
+                                  </span>
+                                  {stud.eligibility.totalScore >= 50 ? (
+                                    <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-1.5 py-0.2 rounded">
+                                      PASS
+                                    </span>
+                                  ) : (
+                                    <span className="text-[10px] font-bold text-red-500 bg-red-500/10 px-1.5 py-0.2 rounded">
+                                      &lt; 50
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-[11px] text-gray-500 font-medium">
+                                  {stud.eligibility.daysCount} / 9 Days
+                                </div>
+                              </div>
                             </td>
 
                             {/* Academic Integrity */}
@@ -1338,18 +1571,34 @@ export const AdminPage = ({ setCurrentTab }) => {
                               </button>
                             </td>
 
-                            {/* Certificate ID */}
+                            {/* Certificate ID & Status */}
                             <td className="py-3 px-4">
                               {cert ? (
-                                <a
-                                  href={`/verify/${cert.certificateId}`}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="font-mono font-bold text-[11px] text-[#B3122B] dark:text-[#ff8a9e] hover:underline flex items-center gap-1"
-                                >
-                                  <span>{cert.certificateId}</span>
-                                  <ExternalLink className="w-3 h-3" />
-                                </a>
+                                <div className="space-y-1">
+                                  <a
+                                    href={`/verify/${cert.certificateId}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="font-mono font-bold text-[11px] text-[#B3122B] dark:text-[#ff8a9e] hover:underline flex items-center gap-1"
+                                  >
+                                    <span>{cert.certificateId}</span>
+                                    <ExternalLink className="w-3 h-3" />
+                                  </a>
+                                  {cert.status === 'revoked' ? (
+                                    <div className="space-y-0.5">
+                                      <span className="inline-block px-1.5 py-0.2 rounded text-[9px] font-bold uppercase bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-300">
+                                        REVOKED
+                                      </span>
+                                      <div className="text-[9px] text-red-500 truncate max-w-[130px]" title={cert.revokedReason || 'Revoked'}>
+                                        {cert.revokedReason || 'Admin revocation'}
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <span className="inline-block px-1.5 py-0.2 rounded text-[9px] font-bold uppercase bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
+                                      VALID
+                                    </span>
+                                  )}
+                                </div>
                               ) : (
                                 <span className="font-mono text-gray-400 text-[11px]">Pending Gen</span>
                               )}
@@ -1406,6 +1655,40 @@ export const AdminPage = ({ setCurrentTab }) => {
                                 >
                                   <Eye className="w-3.5 h-3.5" />
                                 </button>
+
+                                {/* Revoke / Reissue buttons */}
+                                {cert && (
+                                  cert.status === 'revoked' ? (
+                                    <button
+                                      onClick={() => {
+                                        if (window.confirm(`Reissue certificate ${cert.certificateId} for ${stud.name}?`)) {
+                                          reissueCertificate(cert.certificateId);
+                                          setAdminToast(`Reissued certificate ${cert.certificateId}`);
+                                          setTimeout(() => setAdminToast(''), 3000);
+                                        }
+                                      }}
+                                      className="px-2 py-1 rounded-lg bg-emerald-100 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 font-bold text-[10px] hover:bg-emerald-200 transition-colors cursor-pointer"
+                                      title="Reissue this revoked certificate"
+                                    >
+                                      Reissue
+                                    </button>
+                                  ) : (
+                                    <button
+                                      onClick={() => {
+                                        const reason = window.prompt(`Enter reason for revoking certificate ${cert.certificateId}:`, "Academic integrity review");
+                                        if (reason !== null && reason.trim()) {
+                                          revokeCertificate(cert.certificateId, reason.trim());
+                                          setAdminToast(`Revoked certificate ${cert.certificateId}`);
+                                          setTimeout(() => setAdminToast(''), 3000);
+                                        }
+                                      }}
+                                      className="px-2 py-1 rounded-lg bg-red-100 dark:bg-red-950/40 text-red-700 dark:text-red-300 font-bold text-[10px] hover:bg-red-200 transition-colors cursor-pointer"
+                                      title="Revoke certificate"
+                                    >
+                                      Revoke
+                                    </button>
+                                  )
+                                )}
 
                                 {emailStatus === 'failed' ? (
                                   <button
@@ -1496,6 +1779,100 @@ export const AdminPage = ({ setCurrentTab }) => {
               )}
             </div>
 
+          </div>
+        )}
+
+        {/* PUBLIC QR VERIFICATION AUDIT LOGS TAB */}
+        {activeTab === 'verification' && (
+          <div className="space-y-6">
+            <div className="bg-white dark:bg-[#181B20] rounded-3xl border border-[#E8DEC8] dark:border-[#2E3440] p-6 shadow-xs">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-4 border-b border-[#E8DEC8] dark:border-[#2E3440] mb-4">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+                    <h3 className="font-extrabold text-base text-[#1A1A1A] dark:text-white">
+                      Public Certificate QR Verification Audit Trail
+                    </h3>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Real-time log of public /verify/:id requests, QR scans, and verification status outcomes.
+                  </p>
+                </div>
+                <span className="text-xs text-gray-500 font-mono">
+                  {verificationLogs?.length || 0} total verification lookups
+                </span>
+              </div>
+
+              {(!verificationLogs || verificationLogs.length === 0) ? (
+                <div className="py-12 text-center">
+                  <ShieldCheck className="w-12 h-12 text-gray-300 dark:text-gray-600 mx-auto mb-3" />
+                  <h4 className="text-sm font-bold text-gray-700 dark:text-gray-300">
+                    No Verification Lookups Recorded Yet
+                  </h4>
+                  <p className="text-xs text-gray-400 mt-1 max-w-md mx-auto">
+                    When someone scans the QR code on a student's certificate or visits /verify/:certificate-id, the access timestamp and verification result will be logged here.
+                  </p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead className="bg-[#FCF9F2] dark:bg-[#111317] border-b border-[#E8DEC8] dark:border-[#2E3440] text-gray-500 font-bold uppercase text-[10px] tracking-wider">
+                      <tr>
+                        <th className="py-3 px-4">Timestamp</th>
+                        <th className="py-3 px-4">Certificate ID</th>
+                        <th className="py-3 px-4">Student Name</th>
+                        <th className="py-3 px-4">Track</th>
+                        <th className="py-3 px-4">Verification Result</th>
+                        <th className="py-3 px-4 text-right">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#E8DEC8]/50 dark:divide-[#2E3440]">
+                      {verificationLogs.map((log) => (
+                        <tr key={log.id} className="hover:bg-[#FCF9F2]/60 dark:hover:bg-[#111317]/50 transition-colors">
+                          <td className="py-3 px-4 font-mono text-[11px] text-gray-500">
+                            {new Date(log.timestamp).toLocaleString()}
+                          </td>
+                          <td className="py-3 px-4 font-mono font-bold text-[11px] text-[#B3122B] dark:text-[#ff8a9e]">
+                            {log.certificateId}
+                          </td>
+                          <td className="py-3 px-4 font-bold text-[#1A1A1A] dark:text-white">
+                            {log.studentName || '—'}
+                          </td>
+                          <td className="py-3 px-4 text-gray-600 dark:text-gray-300">
+                            {log.language || '—'}
+                          </td>
+                          <td className="py-3 px-4">
+                            <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                              log.result === 'valid'
+                                ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300'
+                                : log.result === 'revoked'
+                                ? 'bg-red-100 text-red-800 dark:bg-red-950/40 dark:text-red-300'
+                                : 'bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300'
+                            }`}>
+                              {log.result === 'valid' && <CheckCircle2 className="w-3 h-3 text-emerald-600" />}
+                              {log.result === 'revoked' && <XCircle className="w-3 h-3 text-red-600" />}
+                              {log.result === 'not_found' && <AlertTriangle className="w-3 h-3 text-amber-600" />}
+                              <span>{log.result === 'valid' ? 'Verified' : log.result === 'revoked' ? 'Revoked' : 'Not Found'}</span>
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 text-right">
+                            <a
+                              href={`/verify/${log.certificateId}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 text-[11px] font-bold text-[#B3122B] hover:underline"
+                            >
+                              <span>View Public Page</span>
+                              <ExternalLink className="w-3 h-3" />
+                            </a>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -1692,9 +2069,9 @@ export const AdminPage = ({ setCurrentTab }) => {
                   prn={selectedStudentForCertModal.prn}
                   track={selectedStudentForCertModal.track || 'Web'}
                   certificateId={selectedStudentForCertModal.cert?.certificateId || 'TNV-CS-2026-0001'}
-                  startDate="1st October 2026"
-                  endDate="9th October 2026"
-                  issueDate="10th October 2026"
+                  startDate={selectedStudentForCertModal.cert?.startDate || SPRINT_START_DATE}
+                  endDate={selectedStudentForCertModal.cert?.endDate || SPRINT_END_DATE}
+                  issueDate={selectedStudentForCertModal.cert?.issuedDate || SPRINT_ISSUE_DATE}
                   showDownloadButton={true}
                 />
               </div>

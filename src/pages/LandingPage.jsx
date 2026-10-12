@@ -27,28 +27,52 @@ export const LandingPage = ({ setCurrentTab }) => {
       desc: "Each morning at 8:00 AM IST, your assigned day task variant unlocks. Deadline is 11:59 PM IST."
     },
     {
-      title: "Early Bird Bonus (+5 pts)",
-      desc: "Submit your solution before 9:00 PM IST on the active day to score +5 extra bonus points."
+      title: "70% Program + 30% Quiz (100 Pts Total)",
+      desc: "Day 1-9 points scale from 5 to 20 pts. 70% from automatic test cases and 30% from the daily quiz."
     },
     {
-      title: "9/9 Streak Glory (+10 pts)",
-      desc: "Maintain your coding discipline for all 9 days straight to earn the grand streak bonus."
+      title: "Pass Mark = 50 / 100 Points",
+      desc: "Score 50 or more points to earn your verified certificate. Completing all 9 days is not required."
     },
     {
-      title: "No Blockers & Catch-Up",
-      desc: "Missing a day never stops tomorrow. Catch up on previous missed days anytime until Day 9 for 50% points."
+      title: "Badges & Leaderboard Tie-Breakers",
+      desc: "Early Bird and 9-Day Streak badges award recognition and break leaderboard ties (no extra points)."
     },
     {
-      title: "Strict Academic Integrity & Zero AI",
-      desc: "AI modules (ChatGPT, Claude, Gemini, Copilot) are strictly prohibited. Tab switching during submission instantly ejects and locks the session. Random 2-minute live vivas celebrate authentic learning."
+      title: "Catch-Up Mode (50% Points)",
+      desc: "Catch up on previous days anytime until 21 Oct 11:59 PM IST to earn 50% of that day's points."
+    },
+    {
+      title: "DPDP Privacy & Integrity Suite",
+      desc: "Consent-based camera/mic checks run strictly client-side to discourage AI assistance. Flags assist mentor review; viva verifies authentic work."
     }
   ];
 
-  const tracks = [
-    { name: "Web Track", desc: "HTML5, modern CSS, dynamic React / JS web interfaces & full-stack components.", badge: "Frontend & Fullstack" },
-    { name: "App Track", desc: "Mobile-responsive cross-platform application logic and responsive UI patterns.", badge: "Mobile / Hybrid" },
-    { name: "Python Track", desc: "Clean Python scripting, utilities, algorithms, data parsers & generators.", badge: "Python & Logic" },
-    { name: "DSA Track", desc: "Data Structures & Algorithms: strings, stacks, two pointers, recursion, and test cases.", badge: "Core Problem Solving" }
+  const languages = [
+    { 
+      name: "C Language", 
+      desc: "Core procedural logic, memory patterns, pointers, loops, arrays and structured problem solving.", 
+      badge: "Fast & Foundational",
+      color: "from-blue-600 to-indigo-700"
+    },
+    { 
+      name: "C++", 
+      desc: "Modern C++, Standard Template Library (STL), object design, recursion, and algorithm efficiency.", 
+      badge: "High Performance",
+      color: "from-sky-600 to-cyan-700"
+    },
+    { 
+      name: "Java", 
+      desc: "Object-oriented architecture, collections framework, safe data types, and enterprise patterns.", 
+      badge: "Robust & Scalable",
+      color: "from-orange-600 to-amber-700"
+    },
+    { 
+      name: "Python", 
+      desc: "Clean Pythonic syntax, list comprehensions, built-in data structures, parsing, and rapid logic.", 
+      badge: "Elegant & Versatile",
+      color: "from-emerald-600 to-teal-700"
+    }
   ];
 
   return (
@@ -57,8 +81,8 @@ export const LandingPage = ({ setCurrentTab }) => {
       {/* Hero Section */}
       <section className="relative overflow-hidden pt-10 pb-20 sm:pt-16 sm:pb-28 border-b border-[#E8DEC8] dark:border-[#2E3440]">
         
-        {/* Divine Background Motif: Faint Durga Mata Sacred Sketch Watermark */}
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none opacity-[0.03] dark:opacity-[0.045] w-[500px] h-[500px] text-[#B3122B]">
+        {/* Divine Background Motif: Faint Durga Mata Sacred Sketch Watermark (Opacity <= 0.08 in hero only) */}
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none opacity-[0.05] dark:opacity-[0.06] w-[460px] h-[460px] text-[#B3122B]">
           <DurgaMataSketch className="w-full h-full" />
         </div>
 
@@ -79,6 +103,11 @@ export const LandingPage = ({ setCurrentTab }) => {
               <DurgaMataSketch className="w-5 h-5 text-[#B3122B] shrink-0" />
               <span>Shri Durga Mata Blessings • Wisdom & Shakti</span>
             </div>
+
+            <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-2xl bg-[#B3122B]/10 dark:bg-[#B3122B]/20 border border-[#B3122B]/30 text-[#B3122B] dark:text-[#ff8a9e] text-xs font-bold shadow-xs">
+              <Calendar className="w-4 h-4 shrink-0 text-[#B3122B] dark:text-[#ff8a9e]" />
+              <span>Day 1 Starts: 13th October 2026</span>
+            </div>
           </div>
 
           <h1 className="text-4xl sm:text-6xl font-black text-[#1A1A1A] dark:text-white tracking-tight leading-tight max-w-4xl mx-auto">
@@ -90,7 +119,7 @@ export const LandingPage = ({ setCurrentTab }) => {
 
 
           <p className="mt-4 text-base sm:text-xl text-[#6b6375] dark:text-[#94a3b8] max-w-2xl mx-auto font-medium">
-            30 to 60 minutes a day. Zero trick questions. Elevate your portfolio with 9 structured projects across Web, App, Python, and DSA tracks.
+            Solve 9 daily programs in your choice of C, C++, Java or Python, paired with a short daily quiz. Designed for real foundational mastery, from loops and arrays to sorting and full modular applications.
           </p>
 
           <div className="mt-4 flex items-center justify-center gap-3 text-sm font-bold text-[#8B0D20] dark:text-[#ff8a9e]">
@@ -112,7 +141,7 @@ export const LandingPage = ({ setCurrentTab }) => {
             </button>
             <button
               onClick={() => setCurrentTab('leaderboard')}
-              className="w-full sm:w-auto px-6 py-3.5 rounded-xl font-bold text-[#1A1A1A] dark:text-white bg-white dark:bg-[#1E232B] border border-[#E8DEC8] dark:border-[#2E3440] hover:bg-[#F5EFEB] dark:hover:bg-[#252A34] transition-all flex items-center justify-center gap-2"
+              className="w-full sm:w-auto px-6 py-3.5 rounded-xl font-bold text-[#1A1A1A] dark:text-white bg-white dark:bg-[#1E232B] border border-[#E8DEC8] dark:border-[#2E3440] hover:bg-[#F5EFEB] dark:hover:bg-[#252A34] transition-all flex items-center justify-center gap-2 cursor-pointer"
             >
               <Trophy className="w-5 h-5 text-amber-500" />
               <span>View Leaderboard</span>
@@ -126,12 +155,12 @@ export const LandingPage = ({ setCurrentTab }) => {
               <div className="text-xs text-[#6b6375] dark:text-[#94a3b8] font-medium mt-0.5">Consecutive Building</div>
             </div>
             <div className="p-4 rounded-xl bg-white dark:bg-[#181B20] border border-[#E8DEC8] dark:border-[#2E3440] text-center shadow-xs">
-              <div className="text-2xl font-black text-amber-600 dark:text-amber-400">140+ Pts</div>
-              <div className="text-xs text-[#6b6375] dark:text-[#94a3b8] font-medium mt-0.5">Max Points & Streaks</div>
+              <div className="text-2xl font-black text-amber-600 dark:text-amber-400">100 Pts</div>
+              <div className="text-xs text-[#6b6375] dark:text-[#94a3b8] font-medium mt-0.5">Total Points (Pass: 50)</div>
             </div>
             <div className="p-4 rounded-xl bg-white dark:bg-[#181B20] border border-[#E8DEC8] dark:border-[#2E3440] text-center shadow-xs">
-              <div className="text-2xl font-black text-emerald-600 dark:text-emerald-400">4 Tracks</div>
-              <div className="text-xs text-[#6b6375] dark:text-[#94a3b8] font-medium mt-0.5">Web, App, Py, DSA</div>
+              <div className="text-2xl font-black text-emerald-600 dark:text-emerald-400">4 Languages</div>
+              <div className="text-xs text-[#6b6375] dark:text-[#94a3b8] font-medium mt-0.5">C, C++, Java, Python</div>
             </div>
             <div className="p-4 rounded-xl bg-white dark:bg-[#181B20] border border-[#E8DEC8] dark:border-[#2E3440] text-center shadow-xs">
               <div className="text-2xl font-black text-blue-600 dark:text-blue-400">3 Variants</div>
@@ -141,32 +170,32 @@ export const LandingPage = ({ setCurrentTab }) => {
         </div>
       </section>
 
-      {/* Tracks Selection Grid */}
+      {/* Languages Selection Grid */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
         <div className="text-center mb-12">
           <h2 className="text-2xl sm:text-3xl font-extrabold text-[#1A1A1A] dark:text-white">
-            Choose Your Track
+            Choose Your Language
           </h2>
           <p className="text-sm text-[#6b6375] dark:text-[#94a3b8] mt-1">
-            Pick your preferred stack at registration. Every track is paced from Beginner to Capstone.
+            Pick your preferred programming language at registration: C, C++, Java, or Python. Each offers 9 daily progressive programs.
           </p>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          {tracks.map((t, idx) => (
+          {languages.map((lang, idx) => (
             <div 
               key={idx}
               className="p-6 rounded-2xl bg-white dark:bg-[#181B20] border border-[#E8DEC8] dark:border-[#2E3440] shadow-sm hover:border-[#B3122B] transition-all flex flex-col justify-between"
             >
               <div>
                 <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded bg-[#B3122B]/10 dark:bg-[#B3122B]/20 text-[#B3122B] dark:text-[#ff8a9e]">
-                  {t.badge}
+                  {lang.badge}
                 </span>
-                <h3 className="text-lg font-bold text-[#1A1A1A] dark:text-white mt-3">{t.name}</h3>
-                <p className="text-xs text-[#6b6375] dark:text-[#94a3b8] mt-2 leading-relaxed">{t.desc}</p>
+                <h3 className="text-lg font-bold text-[#1A1A1A] dark:text-white mt-3">{lang.name}</h3>
+                <p className="text-xs text-[#6b6375] dark:text-[#94a3b8] mt-2 leading-relaxed">{lang.desc}</p>
               </div>
               <div className="mt-5 pt-4 border-t border-[#E8DEC8]/60 dark:border-[#2E3440] flex items-center justify-between text-xs font-semibold text-[#8B0D20] dark:text-[#ff8a9e]">
-                <span>9 Micro-challenges</span>
+                <span>9 Daily Programs</span>
                 <ChevronRight className="w-4 h-4" />
               </div>
             </div>
@@ -313,7 +342,7 @@ export const LandingPage = ({ setCurrentTab }) => {
         <div className="p-8 sm:p-12 rounded-3xl bg-gradient-to-r from-[#8B0D20] to-[#B3122B] text-white shadow-xl shadow-[#B3122B]/20">
           <h3 className="text-2xl sm:text-3xl font-extrabold">Ready to build your developer streak?</h3>
           <p className="mt-2 text-sm sm:text-base text-red-100 max-w-xl mx-auto">
-            SVIT Nashik students can sign in, complete their profile with Roll Number, and start Day 1 immediately.
+            SVIT Nashik students can sign in, complete their profile with Roll Number, and gear up for Day 1 kickoff starting 13th October 2026.
           </p>
           <button
             onClick={() => setCurrentTab('register')}

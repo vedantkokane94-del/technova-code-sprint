@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
+import { computeUserSummary, formatScore } from '../utils/scoring';
 import { 
   Trophy, 
   Flame, 
@@ -10,80 +11,67 @@ import {
   ExternalLink, 
   Sparkles,
   ChevronUp,
-  UserCheck
+  UserCheck,
+  Clock,
+  ShieldCheck
 } from 'lucide-react';
-import { Github } from '../components/GithubIcon';
 
 export const LeaderboardPage = () => {
-  const { submissions, user } = useApp();
+  const { submissions, user, manualOverrides } = useApp();
 
-  const [selectedTrack, setSelectedTrack] = useState('All');
+  const [selectedLanguage, setSelectedLanguage] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
 
   // Group submissions by student
   const studentMap = {};
 
   submissions.forEach(sub => {
-    if (!studentMap[sub.userId]) {
-      studentMap[sub.userId] = {
+    const key = sub.userId || sub.prn;
+    if (!studentMap[key]) {
+      studentMap[key] = {
         userId: sub.userId,
         name: sub.studentName,
         prn: sub.prn,
-        track: sub.track || 'Web',
-        totalPoints: 0,
-        submissionsCount: 0,
-        completedDays: new Set(),
-        failedVivaCount: 0,
+        language: sub.language || sub.track || 'Python',
         submissions: []
       };
     }
-
-    studentMap[sub.userId].submissions.push(sub);
-    if (!sub.failedViva) {
-      studentMap[sub.userId].totalPoints += sub.points || 0;
-      studentMap[sub.userId].completedDays.add(sub.day);
-      studentMap[sub.userId].submissionsCount++;
-    } else {
-      studentMap[sub.userId].failedVivaCount++;
-    }
+    studentMap[key].submissions.push(sub);
   });
 
-  // Convert map to array and compute streaks
+  // Calculate summaries with strict tie-breaking logic (Section 1)
   let leaderboard = Object.values(studentMap).map(stud => {
-    let streak = 0;
-    for (let d = 1; d <= 9; d++) {
-      if (stud.completedDays.has(d)) {
-        streak++;
-      } else {
-        break;
-      }
-    }
-    // Perfect streak bonus +10
-    const perfectBonus = stud.completedDays.size === 9 ? 10 : 0;
+    const summary = computeUserSummary(stud.submissions, manualOverrides[stud.userId || stud.prn]);
     return {
       ...stud,
-      streak,
-      finalScore: stud.totalPoints + perfectBonus
+      summary
     };
   });
 
-  // Sort descending by finalScore then by streak
+  // Sort by:
+  // 1. Total score out of 100 (descending)
+  // 2. On-time days count (descending)
+  // 3. Earlier last-submission time (ascending)
   leaderboard.sort((a, b) => {
-    if (b.finalScore !== a.finalScore) {
-      return b.finalScore - a.finalScore;
+    if (b.summary.totalScore !== a.summary.totalScore) {
+      return b.summary.totalScore - a.summary.totalScore;
     }
-    return b.streak - a.streak;
+    if (b.summary.onTimeCount !== a.summary.onTimeCount) {
+      return b.summary.onTimeCount - a.summary.onTimeCount;
+    }
+    return (a.summary.lastSubmissionTime || Infinity) - (b.summary.lastSubmissionTime || Infinity);
   });
 
   // Filter
   const filtered = leaderboard.filter(item => {
-    const matchesTrack = selectedTrack === 'All' || item.track === selectedTrack;
+    const matchesLang = selectedLanguage === 'All' || 
+      item.language.toLowerCase() === selectedLanguage.toLowerCase();
     const matchesSearch = item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
                           item.prn.toLowerCase().includes(searchQuery.toLowerCase());
-    return matchesTrack && matchesSearch;
+    return matchesLang && matchesSearch;
   });
 
-  const tracks = ['All', 'Web', 'App', 'Python', 'DSA'];
+  const languages = ['All', 'C', 'C++', 'Java', 'Python'];
 
   return (
     <div className="min-h-screen bg-[#FCF9F2] dark:bg-[#0F1115] transition-colors py-10 px-4 sm:px-6 lg:px-8 pb-24">
@@ -93,13 +81,13 @@ export const LeaderboardPage = () => {
         <div className="text-center mb-8">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-500/10 text-amber-700 dark:text-amber-400 text-xs font-bold mb-2">
             <Trophy className="w-3.5 h-3.5" />
-            <span>Live Campus Standings</span>
+            <span>Official Campus Standings</span>
           </div>
           <h1 className="text-3xl sm:text-4xl font-extrabold text-[#1A1A1A] dark:text-white">
             Code Sprint Leaderboard
           </h1>
           <p className="text-sm text-[#6b6375] dark:text-[#94a3b8] mt-1 max-w-xl mx-auto">
-            Real-time rankings based on task completion, early-bird bonuses (+5 pts), and 9-day consistency streaks.
+            Ranked by score out of 100. Ties resolved by on-time days, then earlier last submission time.
           </p>
         </div>
 
@@ -117,11 +105,10 @@ export const LeaderboardPage = () => {
               </h3>
               <div className="text-xs text-gray-400 font-mono">Roll No: {filtered[1].prn}</div>
               <div className="mt-3 text-2xl font-black text-[#1A1A1A] dark:text-white">
-                {filtered[1].finalScore} <span className="text-xs font-semibold text-gray-500">pts</span>
+                {formatScore(filtered[1].summary.totalScore)} <span className="text-xs font-semibold text-gray-500">/ 100</span>
               </div>
-              <div className="mt-1 flex items-center justify-center gap-1 text-xs font-bold text-red-500">
-                <Flame className="w-3.5 h-3.5" />
-                <span>{filtered[1].streak} Day Streak</span>
+              <div className="mt-1 flex items-center justify-center gap-1.5 text-xs font-bold text-gray-500">
+                <span>{filtered[1].summary.onTimeCount} on-time days</span>
               </div>
             </div>
 
@@ -139,11 +126,11 @@ export const LeaderboardPage = () => {
               </h3>
               <div className="text-xs text-gray-400 font-mono">Roll No: {filtered[0].prn}</div>
               <div className="mt-3 text-3xl font-black text-amber-600 dark:text-amber-400">
-                {filtered[0].finalScore} <span className="text-xs font-semibold text-gray-500">pts</span>
+                {formatScore(filtered[0].summary.totalScore)} <span className="text-xs font-semibold text-gray-500">/ 100</span>
               </div>
-              <div className="mt-1 flex items-center justify-center gap-1 text-xs font-bold text-red-500">
-                <Flame className="w-4 h-4 animate-pulse" />
-                <span>{filtered[0].streak} Day Streak</span>
+              <div className="mt-1 flex items-center justify-center gap-1.5 text-xs font-bold text-emerald-600 dark:text-emerald-400">
+                <ShieldCheck className="w-3.5 h-3.5" />
+                <span>{filtered[0].summary.onTimeCount} on-time days</span>
               </div>
             </div>
 
@@ -157,11 +144,10 @@ export const LeaderboardPage = () => {
               </h3>
               <div className="text-xs text-gray-400 font-mono">Roll No: {filtered[2].prn}</div>
               <div className="mt-3 text-2xl font-black text-[#1A1A1A] dark:text-white">
-                {filtered[2].finalScore} <span className="text-xs font-semibold text-gray-500">pts</span>
+                {formatScore(filtered[2].summary.totalScore)} <span className="text-xs font-semibold text-gray-500">/ 100</span>
               </div>
-              <div className="mt-1 flex items-center justify-center gap-1 text-xs font-bold text-red-500">
-                <Flame className="w-3.5 h-3.5" />
-                <span>{filtered[2].streak} Day Streak</span>
+              <div className="mt-1 flex items-center justify-center gap-1.5 text-xs font-bold text-gray-500">
+                <span>{filtered[2].summary.onTimeCount} on-time days</span>
               </div>
             </div>
 
@@ -171,19 +157,19 @@ export const LeaderboardPage = () => {
         {/* Filter and Search Bar */}
         <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mb-6">
           
-          {/* Track Filter Pills */}
+          {/* Language Filter Pills */}
           <div className="flex items-center gap-1.5 overflow-x-auto w-full sm:w-auto p-1 bg-white dark:bg-[#181B20] rounded-xl border border-[#E8DEC8] dark:border-[#2E3440]">
-            {tracks.map(t => (
+            {languages.map(lang => (
               <button
-                key={t}
-                onClick={() => setSelectedTrack(t)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all ${
-                  selectedTrack === t
+                key={lang}
+                onClick={() => setSelectedLanguage(lang)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
+                  selectedLanguage === lang
                     ? 'bg-[#B3122B] text-white shadow-xs'
                     : 'text-gray-600 dark:text-gray-300 hover:bg-[#FCF9F2] dark:hover:bg-[#252A34]'
                 }`}
               >
-                {t} {t !== 'All' ? 'Track' : ''}
+                {lang} {lang !== 'All' ? 'Track' : ''}
               </button>
             ))}
           </div>
@@ -193,7 +179,7 @@ export const LeaderboardPage = () => {
             <Search className="w-4 h-4 text-gray-400 absolute left-3.5 top-3" />
             <input
               type="text"
-              placeholder="Search name or Roll Number..."
+              placeholder="Search student or Roll Number..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full pl-9 pr-4 py-2 rounded-xl border border-[#E8DEC8] dark:border-[#2E3440] bg-white dark:bg-[#181B20] text-xs text-[#1A1A1A] dark:text-white focus:outline-hidden focus:border-[#B3122B]"
@@ -209,18 +195,18 @@ export const LeaderboardPage = () => {
                 <tr>
                   <th className="py-3.5 px-4 sm:px-6">Rank</th>
                   <th className="py-3.5 px-4 sm:px-6">Student</th>
-                  <th className="py-3.5 px-4 sm:px-6">Track</th>
-                  <th className="py-3.5 px-4 sm:px-6">Streak</th>
-                  <th className="py-3.5 px-4 sm:px-6">Days Solved</th>
-                  <th className="py-3.5 px-4 sm:px-6 text-right">Total Score</th>
+                  <th className="py-3.5 px-4 sm:px-6">Language</th>
+                  <th className="py-3.5 px-4 sm:px-6">On-Time Days</th>
+                  <th className="py-3.5 px-4 sm:px-6">Badges</th>
+                  <th className="py-3.5 px-4 sm:px-6 text-right">Total Score (/100)</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#E8DEC8]/50 dark:divide-[#2E3440]">
                 {filtered.map((item, index) => {
-                  const isCurrentUser = user && item.userId === user.uid;
+                  const isCurrentUser = user && (item.userId === user.uid || item.prn === user.prn);
                   return (
                     <tr
-                      key={item.userId}
+                      key={item.userId || item.prn}
                       className={`hover:bg-[#FCF9F2]/60 dark:hover:bg-[#1A1D24] transition-colors ${
                         isCurrentUser ? 'bg-[#B3122B]/5 dark:bg-[#B3122B]/10 font-medium' : ''
                       }`}
@@ -240,10 +226,10 @@ export const LeaderboardPage = () => {
                         </span>
                       </td>
 
-                      {/* Student Info */}
+                      {/* Student Info: Initials circle in red on cream (Section 6A) */}
                       <td className="py-4 px-4 sm:px-6">
                         <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 rounded-full bg-[#B3122B]/10 text-[#B3122B] flex items-center justify-center font-bold text-xs ring-1 ring-[#B3122B]/30">
+                          <div className="w-8 h-8 rounded-full bg-[#FCF9F2] dark:bg-[#2A181C] border border-[#E8DEC8] dark:border-[#4A2028] text-[#B3122B] dark:text-[#ff8a9e] flex items-center justify-center font-bold text-xs shrink-0">
                             {item.name.charAt(0)}
                           </div>
                           <div>
@@ -262,34 +248,46 @@ export const LeaderboardPage = () => {
                         </div>
                       </td>
 
-                      {/* Track */}
+                      {/* Language */}
                       <td className="py-4 px-4 sm:px-6">
-                        <span className="px-2 py-0.5 rounded-md bg-[#FCF9F2] dark:bg-[#252A34] border border-[#E8DEC8] dark:border-[#2E3440] font-semibold text-[11px] text-gray-700 dark:text-gray-300">
-                          {item.track}
+                        <span className="px-2.5 py-1 rounded-md bg-[#FCF9F2] dark:bg-[#252A34] border border-[#E8DEC8] dark:border-[#2E3440] font-semibold text-[11px] text-gray-700 dark:text-gray-300">
+                          {item.language}
                         </span>
                       </td>
 
-                      {/* Streak */}
+                      {/* On-Time Days */}
                       <td className="py-4 px-4 sm:px-6">
-                        <div className="flex items-center gap-1 font-bold text-red-600 dark:text-red-400">
-                          <Flame className="w-3.5 h-3.5" />
-                          <span>{item.streak} d</span>
+                        <div className="flex items-center gap-1 font-semibold text-gray-700 dark:text-gray-300">
+                          <Clock className="w-3.5 h-3.5 text-gray-400" />
+                          <span>{item.summary.onTimeCount} / 9</span>
                         </div>
                       </td>
 
-                      {/* Days Solved */}
+                      {/* Badges (0 points, recognition & tie-breakers) */}
                       <td className="py-4 px-4 sm:px-6">
-                        <div className="text-gray-600 dark:text-gray-300 font-semibold">
-                          {item.completedDays.size} / 9
+                        <div className="flex items-center gap-1.5">
+                          {item.summary.badges?.length > 0 ? (
+                            item.summary.badges.map(b => (
+                              <span 
+                                key={b.id} 
+                                title={b.description}
+                                className="px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-800 dark:text-amber-300 text-[10px] font-bold border border-amber-500/20"
+                              >
+                                {b.icon} {b.label}
+                              </span>
+                            ))
+                          ) : (
+                            <span className="text-gray-400 text-[11px]">—</span>
+                          )}
                         </div>
                       </td>
 
-                      {/* Score */}
+                      {/* Total Score out of 100 */}
                       <td className="py-4 px-4 sm:px-6 text-right">
                         <span className="text-base font-black text-[#B3122B] dark:text-[#ff8a9e]">
-                          {item.finalScore}
+                          {formatScore(item.summary.totalScore)}
                         </span>
-                        <span className="text-[10px] text-gray-400 ml-1">pts</span>
+                        <span className="text-[10px] text-gray-400 ml-1">/ 100</span>
                       </td>
                     </tr>
                   );
@@ -303,9 +301,7 @@ export const LeaderboardPage = () => {
                         {submissions.length === 0 ? "No sprint submissions yet" : "No matching participants found"}
                       </div>
                       <p className="text-xs text-gray-400 mt-1 max-w-sm mx-auto">
-                        {submissions.length === 0 
-                          ? "Leaderboard standings will update dynamically in real time as registered students submit daily sprint tasks."
-                          : "Try adjusting your search query or track filters."}
+                        Standings update in real time as students submit solutions and quizzes.
                       </p>
                     </td>
                   </tr>
