@@ -193,9 +193,9 @@ function applyAdminSecurityHeaders(res) {
   res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https:; connect-src 'self' blob:; frame-ancestors 'none';");
 }
 
-// Sign and verify device cookie token using SESSION_SECRET HMAC
+// Sign and verify device cookie token using ADMIN_JWT_SECRET or SESSION_SECRET HMAC
 function signDeviceToken(rawSecret) {
-  const sessionSecret = process.env.SESSION_SECRET || 'svit-technova-session-secret-2026-alpha';
+  const sessionSecret = process.env.ADMIN_JWT_SECRET || process.env.SESSION_SECRET || 'svit-technova-session-secret-2026-alpha';
   const sig = crypto.createHmac('sha256', sessionSecret).update(rawSecret).digest('hex');
   return `${rawSecret}.${sig}`;
 }
@@ -205,7 +205,7 @@ function verifyDeviceToken(signedToken) {
   const parts = signedToken.split('.');
   if (parts.length !== 2) return null;
   const [rawSecret, sig] = parts;
-  const sessionSecret = process.env.SESSION_SECRET || 'svit-technova-session-secret-2026-alpha';
+  const sessionSecret = process.env.ADMIN_JWT_SECRET || process.env.SESSION_SECRET || 'svit-technova-session-secret-2026-alpha';
   const expectedSig = crypto.createHmac('sha256', sessionSecret).update(rawSecret).digest('hex');
   if (sig !== expectedSig) return null;
   return rawSecret;
@@ -213,7 +213,7 @@ function verifyDeviceToken(signedToken) {
 
 // 2-Hour HMAC-SHA256 JWT generation and verification bound to email, session ID and optional device token
 function createAdminSessionJwt(sessionId, email = 'technicalteamsvit@gmail.com', deviceTokenHash = null) {
-  const sessionSecret = process.env.SESSION_SECRET || 'svit-technova-session-secret-2026-alpha';
+  const sessionSecret = process.env.ADMIN_JWT_SECRET || process.env.SESSION_SECRET || 'svit-technova-session-secret-2026-alpha';
   const now = Math.floor(Date.now() / 1000);
   const exp = now + (2 * 3600); // 2 hours
   const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
@@ -234,7 +234,7 @@ function verifyAdminSessionJwt(jwtToken, deviceTokenHash = null) {
   const parts = jwtToken.split('.');
   if (parts.length !== 3) return null;
   const [header, payload, signature] = parts;
-  const sessionSecret = process.env.SESSION_SECRET || 'svit-technova-session-secret-2026-alpha';
+  const sessionSecret = process.env.ADMIN_JWT_SECRET || process.env.SESSION_SECRET || 'svit-technova-session-secret-2026-alpha';
   const expectedSig = crypto.createHmac('sha256', sessionSecret).update(`${header}.${payload}`).digest('base64url');
   if (signature !== expectedSig) return null;
   try {
