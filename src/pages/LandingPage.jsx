@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 
 import { SVITHubLogo, DurgaMataSketch } from '../components/BrandLogo';
+import { SPRINT_START_DATE } from '../data/tasksSeed';
 
 export const LandingPage = ({ setCurrentTab }) => {
   const { tasks, user } = useApp();
@@ -40,7 +41,7 @@ export const LandingPage = ({ setCurrentTab }) => {
     },
     {
       title: "Catch-Up Mode (50% Points)",
-      desc: "Catch up on previous days anytime until 21 Oct 11:59 PM IST to earn 50% of that day's points."
+      desc: "Catch up on previous days anytime until 22 Oct 11:59 PM IST to earn 50% of that day's points."
     },
     {
       title: "DPDP Privacy & Integrity Suite",
@@ -106,7 +107,7 @@ export const LandingPage = ({ setCurrentTab }) => {
 
             <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-2xl bg-[#B3122B]/10 dark:bg-[#B3122B]/20 border border-[#B3122B]/30 text-[#B3122B] dark:text-[#ff8a9e] text-xs font-bold shadow-xs">
               <Calendar className="w-4 h-4 shrink-0 text-[#B3122B] dark:text-[#ff8a9e]" />
-              <span>Day 1 Starts: 13th October 2026</span>
+              <span>Day 1 Starts: {SPRINT_START_DATE}</span>
             </div>
           </div>
 
@@ -342,7 +343,7 @@ export const LandingPage = ({ setCurrentTab }) => {
         <div className="p-8 sm:p-12 rounded-3xl bg-gradient-to-r from-[#8B0D20] to-[#B3122B] text-white shadow-xl shadow-[#B3122B]/20">
           <h3 className="text-2xl sm:text-3xl font-extrabold">Ready to build your developer streak?</h3>
           <p className="mt-2 text-sm sm:text-base text-red-100 max-w-xl mx-auto">
-            SVIT Nashik students can sign in, complete their profile with Roll Number, and gear up for Day 1 kickoff starting 13th October 2026.
+            SVIT Nashik students can sign in, complete their profile with Roll Number, and gear up for Day 1 kickoff starting {SPRINT_START_DATE}.
           </p>
           <button
             onClick={() => setCurrentTab('register')}

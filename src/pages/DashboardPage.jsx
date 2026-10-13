@@ -149,7 +149,7 @@ export const DashboardPage = ({ setCurrentTab, setSelectedDay }) => {
               Welcome, {user?.name}! 👋
             </h1>
             <p className="text-xs sm:text-sm text-[#6b6375] dark:text-[#94a3b8] mt-0.5">
-              Sprint active from <span className="font-semibold text-[#1A1A1A] dark:text-white">13 Oct to 21 Oct 2026</span>. Active Sprint Day: <span className="font-bold text-[#B3122B] dark:text-[#ff8a9e]">Day {currentDay} of 9 ({getSprintDaySchedule(currentDay)?.dateStr})</span>
+              Sprint active from <span className="font-semibold text-[#1A1A1A] dark:text-white">14 Oct to 22 Oct 2026</span>. Active Sprint Day: <span className="font-bold text-[#B3122B] dark:text-[#ff8a9e]">Day {currentDay} of 9 ({getSprintDaySchedule(currentDay)?.dateStr})</span>
             </p>
           </div>
 
@@ -186,7 +186,7 @@ export const DashboardPage = ({ setCurrentTab, setSelectedDay }) => {
                 </span>
               </div>
               <p className="text-xs text-gray-500 mt-1">
-                Pass mark is <strong>50 points</strong> out of 100. Completing all 9 days is not required. Results lock 11:59 PM IST on 21 Oct 2026.
+                Pass mark is <strong>50 points</strong> out of 100. Completing all 9 days is not required. Results lock 11:59 PM IST on 22 Oct 2026.
               </p>
             </div>
 
@@ -305,7 +305,7 @@ export const DashboardPage = ({ setCurrentTab, setSelectedDay }) => {
             <AlertCircle className="w-5 h-5 text-amber-600 shrink-0" />
             <div className="text-xs sm:text-sm">
               <span className="font-bold">Need more points? </span>
-              Catch up on any past missed day until 11:59 PM IST on 21 Oct 2026 to earn <strong>50% points</strong> and reach the 50-point pass mark!
+              Catch up on any past missed day until 11:59 PM IST on 22 Oct 2026 to earn <strong>50% points</strong> and reach the 50-point pass mark!
             </div>
           </div>
           <button

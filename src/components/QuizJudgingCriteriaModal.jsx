@@ -138,7 +138,7 @@ export const QuizJudgingCriteriaModal = ({
             <ul className="list-disc pl-5 space-y-1.5 leading-relaxed">
               <li>Quiz score and correct answer breakdown are shown immediately after submission.</li>
               <li>Total cumulative score is updated in real-time on your student dashboard and public leaderboard.</li>
-              <li>Final results lock permanently at 11:59 PM IST on 21 Oct 2026. Passing mark for certificate eligibility is 50 or more points.</li>
+              <li>Final results lock permanently at 11:59 PM IST on 22 Oct 2026. Passing mark for certificate eligibility is 50 or more points.</li>
             </ul>
           </div>
 

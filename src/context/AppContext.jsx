@@ -1056,7 +1056,7 @@ export const AppProvider = ({ children }) => {
     saveSubmissions(updated);
   };
 
-  // Current Sprint Day helper: Day 1 starts from 13th October 2026 (02:30:00Z = 8:00 AM IST)
+  // Current Sprint Day helper: Day 1 starts from 14th October 2026 (2026-10-14T08:00:00+05:30 = 8:00 AM IST)
   const [dayOverride, setDayOverride] = useState(() => {
     const saved = localStorage.getItem('technova_sprint_day_override');
     return saved !== null ? parseInt(saved, 10) : null;

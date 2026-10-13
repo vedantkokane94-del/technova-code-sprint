@@ -220,9 +220,9 @@ export const MyCertificatePage = ({ setCurrentTab }) => {
               track={myCert.language || user.language || user.track || 'Python'}
               score={myCert.score || summary.totalScore}
               certificateId={myCert.certificateId}
-              startDate={myCert.startDate || "13 Oct 2026"}
-              endDate={myCert.endDate || "21 Oct 2026"}
-              issueDate={myCert.issuedDate || "22 Oct 2026"}
+              startDate={myCert.startDate || "14 Oct 2026"}
+              endDate={myCert.endDate || "22 Oct 2026"}
+              issueDate={myCert.issuedDate || "23 Oct 2026"}
               showDownloadButton={true}
             />
           </div>

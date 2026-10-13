@@ -66,7 +66,7 @@ export const TaskPage = ({ dayNumber, setCurrentTab }) => {
   // Admin preview toggle (Admins can preview any day at any time without changing schedule for students)
   const [adminPreview, setAdminPreview] = useState(false);
 
-  // UTC Unlock Schedule checking: Day 1 unlocks 13 Oct 2026 8:00 AM IST (2026-10-13T02:30:00Z)
+  // UTC Unlock Schedule checking: Day 1 unlocks 14 Oct 2026 8:00 AM IST (2026-10-14T08:00:00+05:30)
   const unlockUtc = getDayUnlockTimeUtc(task.day);
   const unlockMs = Date.parse(unlockUtc);
 

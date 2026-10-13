@@ -224,13 +224,13 @@ async function generateTestCertificate() {
     { text: "a daily coding challenge organised by the Technical Skill Development Hub, SVIT Nashik,", font: helvetica, size: 12.5, color: textColor }
   ], 360);
 
-  // Line 3: "from 13 Oct 2026 to 21 Oct 2026 , in the [Language] track, with a score of [Score] / 100."
+  // Line 3: "from 14 Oct 2026 to 22 Oct 2026 , in the [Language] track, with a score of [Score] / 100."
   // Note: the bold values are Helvetica Bold 12 pt in red
   drawMixedCenteredLine([
     { text: "from  ", font: helvetica, size: 12.5, color: textColor },
-    { text: "13 Oct 2026", font: helveticaBold, size: 12, color: redColor },
+    { text: "14 Oct 2026", font: helveticaBold, size: 12, color: redColor },
     { text: "  to  ", font: helvetica, size: 12.5, color: textColor },
-    { text: "21 Oct 2026", font: helveticaBold, size: 12, color: redColor },
+    { text: "22 Oct 2026", font: helveticaBold, size: 12, color: redColor },
     { text: " , in the ", font: helvetica, size: 12.5, color: textColor },
     { text: `[${language}]`, font: helveticaBold, size: 12, color: redColor },
     { text: " track, with a score of ", font: helvetica, size: 12.5, color: textColor },

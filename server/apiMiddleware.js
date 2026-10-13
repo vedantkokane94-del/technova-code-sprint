@@ -1351,7 +1351,7 @@ export function createApiMiddleware() {
           type: 'Merit',
           score: 100,
           rank: 1,
-          issueDate: '22 Oct 2026',
+          issueDate: '23 Oct 2026',
           verificationCount: 1,
           isTestCertificate: true
         });
@@ -1401,7 +1401,7 @@ export function createApiMiddleware() {
         type: cert.type || 'Participation',
         score: cert.score ?? 100,
         rank: cert.rank || null,
-        issueDate: cert.issueDate || cert.issuedDate || '22 Oct 2026',
+        issueDate: cert.issueDate || cert.issuedDate || '23 Oct 2026',
         revokedReason: isRevoked ? (cert.revokedReason || 'Administrative revocation') : null,
         revokedAt: isRevoked ? (cert.revokedAt || null) : null,
         verificationCount: cert.verificationCount
@@ -1486,7 +1486,7 @@ export function createApiMiddleware() {
         const score = Number(input.score) || 0;
         const rank = input.rank || null;
         const eventName = input.eventName || input.event || 'Technova Code Sprint: 9 Days to Build';
-        const issueDate = input.issueDate || input.issuedDate || '22 Oct 2026';
+        const issueDate = input.issueDate || input.issuedDate || '23 Oct 2026';
         const type = input.type || determineType(score, rank);
 
         // Check idempotency: does certificate already exist for this student and event?

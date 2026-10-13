@@ -1,12 +1,15 @@
-export const SPRINT_START_DATE = "13th October 2026";
-export const SPRINT_END_DATE = "21st October 2026";
-export const SPRINT_ISSUE_DATE = "22nd October 2026";
+export const SPRINT_START_DATE = "14th October 2026";
+export const SPRINT_END_DATE = "22nd October 2026";
+export const SPRINT_ISSUE_DATE = "23rd October 2026";
+export const EVENT_START_DATE = "14 Oct 2026";
+export const EVENT_END_DATE = "22 Oct 2026";
+export const EVENT_ISSUE_DATE = "23 Oct 2026";
 
-// Section 2: Central Schedule Definition with exact UTC timestamps
-// Day 1 unlocks on 13 October 2026 at 8:00 AM IST (2026-10-13T02:30:00Z)
+// Section 2: Central Schedule Definition with explicit IST (+05:30) timestamps
+// Day 1 unlocks on 14 October 2026 at 8:00 AM IST (2026-10-14T08:00:00+05:30 / 2026-10-14T02:30:00Z)
 // Each subsequent day adds exactly 24 hours (8:00 AM IST)
-export const SPRINT_UNLOCK_BASE_UTC = "2026-10-13T02:30:00Z";
-export const SPRINT_CATCHUP_CLOSE_UTC = "2026-10-21T18:29:59Z"; // 11:59:59 PM IST, 21 Oct 2026
+export const SPRINT_UNLOCK_BASE_UTC = "2026-10-14T08:00:00+05:30";
+export const SPRINT_CATCHUP_CLOSE_UTC = "2026-10-22T23:59:59+05:30"; // 11:59:59 PM IST, 22 Oct 2026
 
 export const getDayUnlockTimeUtc = (day) => {
   const baseMs = Date.parse(SPRINT_UNLOCK_BASE_UTC);
@@ -15,10 +18,10 @@ export const getDayUnlockTimeUtc = (day) => {
 };
 
 export const getDayDeadlineTimeUtc = (day) => {
-  // Daily on-time submission closes at 11:59:59 PM IST (18:29:59 UTC on same IST date)
+  // Daily on-time submission closes at 11:59:59 PM IST (+05:30 / 18:29:59 UTC on same IST date)
   const unlockIso = getDayUnlockTimeUtc(day);
   const datePart = unlockIso.slice(0, 10);
-  return `${datePart}T18:29:59Z`;
+  return new Date(`${datePart}T23:59:59+05:30`).toISOString();
 };
 
 export const isDayUnlocked = (day, currentTimeMs = Date.now()) => {
@@ -30,20 +33,22 @@ export const getEffectiveSprintDay = (currentTimeMs = Date.now()) => {
   for (let d = 9; d >= 1; d--) {
     if (isDayUnlocked(d, currentTimeMs)) return d;
   }
-  return 0; // Pre-sprint kickoff (before 13 Oct 2026, 8:00 AM IST)
+  return 0; // Pre-sprint kickoff (before 14 Oct 2026, 8:00 AM IST)
 };
 
 export const SPRINT_SCHEDULE = [
-  { day: 1, dateStr: "13 Oct 2026", weekday: "Monday", label: "Kickoff: Standard I/O & Variables", fullDate: "13th October 2026", isKickoff: true, unlockUtc: getDayUnlockTimeUtc(1) },
-  { day: 2, dateStr: "14 Oct 2026", weekday: "Tuesday", label: "Conditionals & Decision Logic", fullDate: "14th October 2026", unlockUtc: getDayUnlockTimeUtc(2) },
-  { day: 3, dateStr: "15 Oct 2026", weekday: "Wednesday", label: "Iteration: Loops & Series", fullDate: "15th October 2026", unlockUtc: getDayUnlockTimeUtc(3) },
-  { day: 4, dateStr: "16 Oct 2026", weekday: "Thursday", label: "Nested Loops & Number Theory", fullDate: "16th October 2026", unlockUtc: getDayUnlockTimeUtc(4) },
-  { day: 5, dateStr: "17 Oct 2026", weekday: "Friday", label: "Mathematical Logic & Digits", fullDate: "17th October 2026", unlockUtc: getDayUnlockTimeUtc(5) },
-  { day: 6, dateStr: "18 Oct 2026", weekday: "Saturday", label: "Array Structures & Traversal", fullDate: "18th October 2026", unlockUtc: getDayUnlockTimeUtc(6) },
-  { day: 7, dateStr: "19 Oct 2026", weekday: "Sunday", label: "Modular Functions & Recursion", fullDate: "19th October 2026", unlockUtc: getDayUnlockTimeUtc(7) },
-  { day: 8, dateStr: "20 Oct 2026", weekday: "Monday", label: "Searching & Sorting Algorithms", fullDate: "20th October 2026", unlockUtc: getDayUnlockTimeUtc(8) },
-  { day: 9, dateStr: "21 Oct 2026", weekday: "Tuesday", label: "Capstone: Menu-Driven Application", fullDate: "21st October 2026", isFinale: true, unlockUtc: getDayUnlockTimeUtc(9) }
+  { day: 1, dateStr: "14 Oct 2026", weekday: "Wednesday", label: "Kickoff: Standard I/O & Variables", fullDate: "14th October 2026", isKickoff: true, unlockUtc: getDayUnlockTimeUtc(1) },
+  { day: 2, dateStr: "15 Oct 2026", weekday: "Thursday", label: "Conditionals & Decision Logic", fullDate: "15th October 2026", unlockUtc: getDayUnlockTimeUtc(2) },
+  { day: 3, dateStr: "16 Oct 2026", weekday: "Friday", label: "Iteration: Loops & Series", fullDate: "16th October 2026", unlockUtc: getDayUnlockTimeUtc(3) },
+  { day: 4, dateStr: "17 Oct 2026", weekday: "Saturday", label: "Nested Loops & Number Theory", fullDate: "17th October 2026", unlockUtc: getDayUnlockTimeUtc(4) },
+  { day: 5, dateStr: "18 Oct 2026", weekday: "Sunday", label: "Mathematical Logic & Digits", fullDate: "18th October 2026", unlockUtc: getDayUnlockTimeUtc(5) },
+  { day: 6, dateStr: "19 Oct 2026", weekday: "Monday", label: "Array Structures & Traversal", fullDate: "19th October 2026", unlockUtc: getDayUnlockTimeUtc(6) },
+  { day: 7, dateStr: "20 Oct 2026", weekday: "Tuesday", label: "Modular Functions & Recursion", fullDate: "20th October 2026", unlockUtc: getDayUnlockTimeUtc(7) },
+  { day: 8, dateStr: "21 Oct 2026", weekday: "Wednesday", label: "Searching & Sorting Algorithms", fullDate: "21st October 2026", unlockUtc: getDayUnlockTimeUtc(8) },
+  { day: 9, dateStr: "22 Oct 2026", weekday: "Thursday", label: "Capstone: Menu-Driven Application", fullDate: "22nd October 2026", isFinale: true, unlockUtc: getDayUnlockTimeUtc(9) }
 ];
+
+export const EVENT_DAYS = SPRINT_SCHEDULE;
 
 export const getSprintDaySchedule = (day) => {
   return SPRINT_SCHEDULE.find(s => s.day === Number(day)) || SPRINT_SCHEDULE[0];

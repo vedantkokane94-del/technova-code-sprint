@@ -1400,7 +1400,7 @@ export const AdminPage = ({ setCurrentTab }) => {
                       Sprint Schedule & Active Day Manager
                     </h2>
                     <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-[#B3122B] text-white">
-                      Day 1 Starts: 13 Oct 2026
+                      Day 1 Starts: 14 Oct 2026
                     </span>
                   </div>
                   <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
@@ -3345,7 +3345,7 @@ export const AdminPage = ({ setCurrentTab }) => {
                     </h3>
                   </div>
                   <p className="text-xs text-gray-500 mt-1 max-w-2xl">
-                    Simulate any moment in the 9-day schedule (13 Oct to 21 Oct 2026). Test pre-launch countdowns, Day 1 auto-unlock, cross-day consent bypass, scoring formulas, viva reviews, and certificate issuance without waiting for real calendar dates.
+                    Simulate any moment in the 9-day schedule (14 Oct to 22 Oct 2026). Test pre-launch countdowns, Day 1 auto-unlock, cross-day consent bypass, scoring formulas, viva reviews, and certificate issuance without waiting for real calendar dates.
                   </p>
                 </div>
 
@@ -3485,9 +3485,9 @@ export const AdminPage = ({ setCurrentTab }) => {
                 {/* Preset 1: Pre-Launch */}
                 <button
                   onClick={() => {
-                    const t = Date.parse('2026-10-12T12:30:00Z'); // 12 Oct 6:00 PM IST
+                    const t = Date.parse('2026-10-13T18:00:00+05:30'); // 13 Oct 6:00 PM IST
                     setSimulatedServerTime(t);
-                    setAdminToast("Set simulated time to Pre-Launch (12 Oct 2026, 6:00 PM IST).");
+                    setAdminToast("Set simulated time to Pre-Launch (13 Oct 2026, 6:00 PM IST).");
                     setTimeout(() => setAdminToast(''), 3000);
                   }}
                   className="p-3.5 rounded-2xl bg-[#FCF9F2] dark:bg-[#111317] border border-[#E8DEC8] dark:border-[#2E3440] hover:border-purple-500 text-left transition-all cursor-pointer group"
@@ -3496,7 +3496,7 @@ export const AdminPage = ({ setCurrentTab }) => {
                     1. Pre-Launch (Day 0)
                   </div>
                   <div className="text-[11px] font-mono text-purple-600 dark:text-purple-400 mt-0.5">
-                    12 Oct 2026, 06:00 PM IST
+                    13 Oct 2026, 06:00 PM IST
                   </div>
                   <p className="text-[10px] text-gray-500 mt-1">
                     Verifies pre-registration, consent form, and the live countdown screen before Day 1 unlocks.
@@ -3506,7 +3506,7 @@ export const AdminPage = ({ setCurrentTab }) => {
                 {/* Preset 2: 15s Before Kickoff */}
                 <button
                   onClick={() => {
-                    const t = Date.parse('2026-10-13T02:29:45Z'); // 13 Oct 7:59:45 AM IST (15s before 8:00 AM)
+                    const t = Date.parse('2026-10-14T07:59:45+05:30'); // 14 Oct 7:59:45 AM IST (15s before 8:00 AM)
                     setSimulatedServerTime(t);
                     setAdminToast("Set simulated time to 15s Before Kickoff. Watch live auto-unlock!");
                     setTimeout(() => setAdminToast(''), 3000);
@@ -3517,7 +3517,7 @@ export const AdminPage = ({ setCurrentTab }) => {
                     2. 15s Before Kickoff ⏱️
                   </div>
                   <div className="text-[11px] font-mono text-purple-600 dark:text-purple-400 mt-0.5">
-                    13 Oct 2026, 07:59:45 AM IST
+                    14 Oct 2026, 07:59:45 AM IST
                   </div>
                   <p className="text-[10px] text-gray-500 mt-1">
                     Countdown timer ticks down to 0:00 and automatically unlocks Day 1 live on the student screen.
@@ -3527,9 +3527,9 @@ export const AdminPage = ({ setCurrentTab }) => {
                 {/* Preset 3: Day 1 Active */}
                 <button
                   onClick={() => {
-                    const t = Date.parse('2026-10-13T05:30:00Z'); // 13 Oct 11:00 AM IST
+                    const t = Date.parse('2026-10-14T11:00:00+05:30'); // 14 Oct 11:00 AM IST
                     setSimulatedServerTime(t);
-                    setAdminToast("Set simulated time to Day 1 Active (13 Oct 2026, 11:00 AM IST).");
+                    setAdminToast("Set simulated time to Day 1 Active (14 Oct 2026, 11:00 AM IST).");
                     setTimeout(() => setAdminToast(''), 3000);
                   }}
                   className="p-3.5 rounded-2xl bg-[#FCF9F2] dark:bg-[#111317] border border-[#E8DEC8] dark:border-[#2E3440] hover:border-purple-500 text-left transition-all cursor-pointer group"
@@ -3538,7 +3538,7 @@ export const AdminPage = ({ setCurrentTab }) => {
                     3. Day 1 Kickoff Active
                   </div>
                   <div className="text-[11px] font-mono text-purple-600 dark:text-purple-400 mt-0.5">
-                    13 Oct 2026, 11:00 AM IST
+                    14 Oct 2026, 11:00 AM IST
                   </div>
                   <p className="text-[10px] text-gray-500 mt-1">
                     Day 1 challenge active (5 points). Problem statement, variants, and quiz open for submissions.
@@ -3548,9 +3548,9 @@ export const AdminPage = ({ setCurrentTab }) => {
                 {/* Preset 4: Day 2 Active */}
                 <button
                   onClick={() => {
-                    const t = Date.parse('2026-10-14T04:30:00Z'); // 14 Oct 10:00 AM IST
+                    const t = Date.parse('2026-10-15T10:00:00+05:30'); // 15 Oct 10:00 AM IST
                     setSimulatedServerTime(t);
-                    setAdminToast("Set simulated time to Day 2 Active (14 Oct 2026, 10:00 AM IST).");
+                    setAdminToast("Set simulated time to Day 2 Active (15 Oct 2026, 10:00 AM IST).");
                     setTimeout(() => setAdminToast(''), 3000);
                   }}
                   className="p-3.5 rounded-2xl bg-[#FCF9F2] dark:bg-[#111317] border border-[#E8DEC8] dark:border-[#2E3440] hover:border-purple-500 text-left transition-all cursor-pointer group"
@@ -3559,7 +3559,7 @@ export const AdminPage = ({ setCurrentTab }) => {
                     4. Day 2 Active (Consent Bypass)
                   </div>
                   <div className="text-[11px] font-mono text-purple-600 dark:text-purple-400 mt-0.5">
-                    14 Oct 2026, 10:00 AM IST
+                    15 Oct 2026, 10:00 AM IST
                   </div>
                   <p className="text-[10px] text-gray-500 mt-1">
                     Tests cross-day consent bypassing: modal is skipped for students who consented on Day 1.
@@ -3569,9 +3569,9 @@ export const AdminPage = ({ setCurrentTab }) => {
                 {/* Preset 5: Catch-Up Period */}
                 <button
                   onClick={() => {
-                    const t = Date.parse('2026-10-21T12:30:00Z'); // 21 Oct 6:00 PM IST
+                    const t = Date.parse('2026-10-22T18:00:00+05:30'); // 22 Oct 6:00 PM IST
                     setSimulatedServerTime(t);
-                    setAdminToast("Set simulated time to Catch-Up Period (21 Oct 2026, 6:00 PM IST).");
+                    setAdminToast("Set simulated time to Catch-Up Period (22 Oct 2026, 6:00 PM IST).");
                     setTimeout(() => setAdminToast(''), 3000);
                   }}
                   className="p-3.5 rounded-2xl bg-[#FCF9F2] dark:bg-[#111317] border border-[#E8DEC8] dark:border-[#2E3440] hover:border-purple-500 text-left transition-all cursor-pointer group"
@@ -3580,7 +3580,7 @@ export const AdminPage = ({ setCurrentTab }) => {
                     5. Catch-Up Window (50% Points)
                   </div>
                   <div className="text-[11px] font-mono text-purple-600 dark:text-purple-400 mt-0.5">
-                    21 Oct 2026, 06:00 PM IST
+                    22 Oct 2026, 06:00 PM IST
                   </div>
                   <p className="text-[10px] text-gray-500 mt-1">
                     All 9 days unlocked. Catch-up submissions receive 50% points. Closes at 11:59 PM IST.
@@ -3590,9 +3590,9 @@ export const AdminPage = ({ setCurrentTab }) => {
                 {/* Preset 6: Post-Sprint Results Locked */}
                 <button
                   onClick={() => {
-                    const t = Date.parse('2026-10-21T18:35:00Z'); // 22 Oct 12:05 AM IST (after 11:59 PM 21 Oct)
+                    const t = Date.parse('2026-10-23T00:05:00+05:30'); // 23 Oct 12:05 AM IST (after 11:59 PM 22 Oct)
                     setSimulatedServerTime(t);
-                    setAdminToast("Set simulated time to Post-Sprint Results Locked (22 Oct 2026).");
+                    setAdminToast("Set simulated time to Post-Sprint Results Locked (23 Oct 2026).");
                     setTimeout(() => setAdminToast(''), 3000);
                   }}
                   className="p-3.5 rounded-2xl bg-[#FCF9F2] dark:bg-[#111317] border border-[#E8DEC8] dark:border-[#2E3440] hover:border-purple-500 text-left transition-all cursor-pointer group"
@@ -3601,7 +3601,7 @@ export const AdminPage = ({ setCurrentTab }) => {
                     6. Results Locked (Final Close) 🔒
                   </div>
                   <div className="text-[11px] font-mono text-purple-600 dark:text-purple-400 mt-0.5">
-                    22 Oct 2026, 12:05 AM IST
+                    23 Oct 2026, 12:05 AM IST
                   </div>
                   <p className="text-[10px] text-gray-500 mt-1">
                     Submissions permanently locked. Pass mark (≥ 50 pts) determines certificate qualification.
@@ -4666,7 +4666,7 @@ export const AdminPage = ({ setCurrentTab }) => {
 
           const plainTextBody = `Dear ${student.name},
 
-Congratulations! You have successfully completed the Technova Code Sprint: 9 Days to Build (13 to 21 October 2026), organised by the Technical Skill Development Hub, SVIT Nashik.
+Congratulations! You have successfully completed the Technova Code Sprint: 9 Days to Build (14 to 22 October 2026), organised by the Technical Skill Development Hub, SVIT Nashik.
 
 Your final score: ${score} / 100 | Language: ${language}
 Certificate ID: ${certId}
@@ -4790,7 +4790,7 @@ This is an automated email. For queries, reply to this email.`;
                       <div className="text-gray-800 dark:text-gray-200 space-y-3 leading-relaxed">
                         <p className="font-semibold text-sm">Dear {student.name},</p>
                         <p>
-                          Congratulations! You have successfully completed the <strong>Technova Code Sprint: 9 Days to Build</strong> (13 to 21 October 2026), organised by the Technical Skill Development Hub, SVIT Nashik.
+                          Congratulations! You have successfully completed the <strong>Technova Code Sprint: 9 Days to Build</strong> (14 to 22 October 2026), organised by the Technical Skill Development Hub, SVIT Nashik.
                         </p>
                         
                         <div className="p-3 rounded-xl bg-[#FCF9F2] dark:bg-[#1C2028] border border-[#E8DEC8] dark:border-[#2E3440] font-mono font-bold flex flex-wrap gap-4 text-xs">

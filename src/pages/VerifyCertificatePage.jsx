@@ -324,7 +324,7 @@ function VerifyCertificateContent({ certificateId, onBack = null }) {
                   <div>
                     <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Challenge Dates</span>
                     <div className="font-medium text-xs text-gray-700 dark:text-gray-300">
-                      13 Oct 2026 to 21 Oct 2026
+                      14 Oct 2026 to 22 Oct 2026
                     </div>
                   </div>
                 </div>
@@ -333,7 +333,7 @@ function VerifyCertificateContent({ certificateId, onBack = null }) {
                 <div className="pt-2 border-t border-[#E8DEC8]/50 dark:border-[#2E3440] flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-gray-500">
                   <div>
                     <span className="text-[10px] uppercase font-bold text-gray-400 block">Issue Date</span>
-                    <span className="font-semibold text-gray-800 dark:text-gray-200">{certData.issueDate || certData.issuedDate || '22 Oct 2026'}</span>
+                    <span className="font-semibold text-gray-800 dark:text-gray-200">{certData.issueDate || certData.issuedDate || '23 Oct 2026'}</span>
                   </div>
 
                   <div className="sm:text-right">

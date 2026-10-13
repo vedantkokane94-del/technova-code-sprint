@@ -169,7 +169,7 @@ export const CertificateView = ({
               a daily coding challenge organised by the Technical Skill Development Hub, SVIT Nashik,
             </div>
             <div>
-              from <strong className="text-[#B3122B]">13 Oct 2026</strong> to <strong className="text-[#B3122B]">21 Oct 2026</strong> , in the <strong className="text-[#B3122B]">[{displayLanguage}]</strong> track, with a score of <strong className="text-[#B3122B]">[{displayScore}]</strong> / 100.
+              from <strong className="text-[#B3122B]">14 Oct 2026</strong> to <strong className="text-[#B3122B]">22 Oct 2026</strong> , in the <strong className="text-[#B3122B]">[{displayLanguage}]</strong> track, with a score of <strong className="text-[#B3122B]">[{displayScore}]</strong> / 100.
             </div>
           </div>
 

@@ -194,8 +194,8 @@ export function computeUserSummary(submissions = [], manualOverrides = {}, stude
   // Pass mark check (50/100)
   const isPassed = totalScore >= PASS_MARK_POINTS && !hasPendingReview;
 
-  // Deadline check: 21 Oct 2026, 11:59:59 PM IST
-  const deadlineIST = new Date("2026-10-21T18:29:59.000Z"); // 23:59:59 IST is 18:29:59 UTC
+  // Deadline check: 22 Oct 2026, 11:59:59 PM IST
+  const deadlineIST = new Date("2026-10-22T23:59:59+05:30"); // 23:59:59 IST is 18:29:59 UTC
   const isPastDeadline = Date.now() > deadlineIST.getTime();
 
   let progressStatus = "On track";

@@ -106,7 +106,7 @@ export async function generateCertificatePdf({
   rank = null,
   type = 'Participation',
   certificateId = 'CERT-2026-TEST0001',
-  issueDate = '22 Oct 2026',
+  issueDate = '23 Oct 2026',
   templateConfig = {}
 }) {
   const config = { ...DEFAULT_TEMPLATE_CONFIG, ...templateConfig };
@@ -353,13 +353,13 @@ export async function generateCertificatePdf({
     { text: 'a daily coding challenge organised by the Technical Skill Development Hub, SVIT Nashik,', font: helvetica, size: 12.5, color: textColor }
   ], 360);
 
-  // Line 3: "from 13 Oct 2026 to 21 Oct 2026 , in the [Language] track, with a score of [Score] / 100" (+ Rank if available)
+  // Line 3: "from 14 Oct 2026 to 22 Oct 2026 , in the [Language] track, with a score of [Score] / 100" (+ Rank if available)
   const formattedScore = typeof score === 'number' ? score.toFixed(1) : String(score);
   const line3Segments = [
     { text: 'from  ', font: helvetica, size: 12.5, color: textColor },
-    { text: '13 Oct 2026', font: helveticaBold, size: 12, color: redColor },
+    { text: '14 Oct 2026', font: helveticaBold, size: 12, color: redColor },
     { text: '  to  ', font: helvetica, size: 12.5, color: textColor },
-    { text: '21 Oct 2026', font: helveticaBold, size: 12, color: redColor },
+    { text: '22 Oct 2026', font: helveticaBold, size: 12, color: redColor },
     { text: ' , in the ', font: helvetica, size: 12.5, color: textColor },
     { text: `[${language}]`, font: helveticaBold, size: 12, color: redColor },
     { text: ' track, with a score of ', font: helvetica, size: 12.5, color: textColor },
@@ -566,7 +566,7 @@ export async function generateCertificatesZip(certificatesList = [], templateCon
         rank: cert.rank || null,
         type: cert.type || 'Participation',
         certificateId: cert.certificateId,
-        issueDate: cert.issueDate || cert.issuedDate || '22 Oct 2026',
+        issueDate: cert.issueDate || cert.issuedDate || '23 Oct 2026',
         templateConfig
       });
       const sanitizedName = (cert.studentName || 'Student').replace(/[^a-zA-Z0-9_\-]/g, '_');
