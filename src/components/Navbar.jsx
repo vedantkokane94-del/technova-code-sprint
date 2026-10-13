@@ -25,11 +25,8 @@ export const Navbar = ({ currentTab, setCurrentTab }) => {
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'leaderboard', label: 'Leaderboard', icon: Trophy },
     { id: 'my-certificate', label: 'My Certificate', icon: Award },
+    { id: 'admin', label: isAdmin ? 'Admin' : 'Admin Login', icon: ShieldCheck, badge: isAdmin ? 'Faculty' : null },
   ];
-
-  if (isAdmin) {
-    navLinks.push({ id: 'admin', label: 'Admin', icon: ShieldCheck, badge: 'Faculty' });
-  }
 
   const handleNavClick = (id) => {
     setCurrentTab(id);

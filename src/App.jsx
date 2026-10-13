@@ -216,17 +216,17 @@ function SprintApp() {
             <span>•</span>
             <span>© 2026 SVIT Nashik</span>
             <span>•</span>
-            {/* Low-key, always present and tappable (at least 44px tall) Admin Login entry point */}
+            {/* Prominent, always present and tappable (at least 44px tall) Admin Login entry point */}
             <button
               type="button"
               onClick={() => {
                 setCurrentTab('admin');
                 window.history.pushState(null, '', '/admin');
               }}
-              className="min-h-[44px] px-2.5 py-2 inline-flex items-center gap-1.5 text-xs text-gray-400 hover:text-[#B3122B] dark:hover:text-[#ff8a9e] transition-colors cursor-pointer rounded-lg"
+              className="min-h-[44px] px-3.5 py-2 inline-flex items-center gap-1.5 text-xs font-bold text-[#B3122B] dark:text-[#ff8a9e] bg-[#B3122B]/10 hover:bg-[#B3122B] hover:text-white dark:hover:text-white border border-[#B3122B]/30 rounded-xl transition-all cursor-pointer shadow-2xs"
               title={isAdmin ? "Open Administrator Command Center" : "Institutional Administrator Sign-In"}
             >
-              <ShieldCheck className="w-3.5 h-3.5" />
+              <ShieldCheck className="w-4 h-4" />
               <span>{isAdmin ? "Admin Dashboard" : "Admin Login"}</span>
             </button>
           </div>
