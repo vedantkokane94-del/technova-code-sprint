@@ -99,6 +99,7 @@ export const AdminPage = ({ setCurrentTab }) => {
     setSprintDay,
     getAllStudents,
     getStudentEligibility,
+    manualOverrides = {},
     toggleManualOverride,
     certificates,
     issueCertificate,
@@ -2632,7 +2633,11 @@ export const AdminPage = ({ setCurrentTab }) => {
                             {/* Manual Override Action Toggle */}
                             <td className="py-3 px-4">
                               <button
-                                onClick={() => toggleManualOverride(stud.key)}
+                                onClick={() => {
+                                  if (typeof toggleManualOverride === 'function') {
+                                    toggleManualOverride(stud.key);
+                                  }
+                                }}
                                 className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all border cursor-pointer ${
                                   isOverridden
                                     ? 'bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30 hover:bg-amber-500/20'
@@ -5096,10 +5101,11 @@ This is an automated email. For queries, reply to this email.`;
           const studentSubs = submissions.filter(
             s => s.userId === student.uid || s.prn === student.prn || s.studentName === student.name
           );
-          const studentCert = certificates[student.uid || student.prn];
+          const studentCert = certificates ? (certificates[student.uid] || certificates[student.prn]) : null;
           const studentKey = student.uid || student.prn;
-          const isOverridden = manualOverrides[studentKey] !== undefined;
-          const overrideVal = manualOverrides[studentKey];
+          const eligibility = typeof getStudentEligibility === 'function' ? getStudentEligibility(studentKey) : null;
+          const isOverridden = eligibility ? eligibility.isOverridden : Boolean(manualOverrides && manualOverrides[studentKey] !== undefined);
+          const overrideVal = eligibility ? eligibility.overrideValue : (manualOverrides ? manualOverrides[studentKey] : undefined);
 
           // Compute 9-day submission map
           const dayMap = {};
@@ -5107,11 +5113,11 @@ This is an automated email. For queries, reply to this email.`;
             dayMap[sub.day] = sub;
           });
 
-          const completedDays = Object.keys(dayMap).length;
-          const totalPoints = studentSubs.reduce((acc, curr) => acc + (curr.earnedPoints || curr.points || 0), 0);
-          const hasFailedViva = studentSubs.some(s => s.failedViva);
-          const hasPendingViva = studentSubs.some(s => s.vivaRequired && !s.failedViva);
-          const isEligible = isOverridden ? overrideVal : (completedDays === 9 && !hasFailedViva && !hasPendingViva);
+          const completedDays = eligibility?.daysCount ?? Object.keys(dayMap).length;
+          const totalPoints = eligibility?.totalScore ?? studentSubs.reduce((acc, curr) => acc + (curr.earnedPoints || curr.points || 0), 0);
+          const hasFailedViva = eligibility?.hasFailedViva ?? studentSubs.some(s => s.failedViva);
+          const hasPendingViva = eligibility?.hasUnresolvedFlag ?? studentSubs.some(s => s.vivaRequired && !s.failedViva);
+          const isEligible = eligibility?.isEligible ?? (isOverridden ? overrideVal : (totalPoints >= 50 && !hasFailedViva && !hasPendingViva));
 
           return (
             <div className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
@@ -5358,7 +5364,11 @@ This is an automated email. For queries, reply to this email.`;
                 <div className="pt-4 border-t border-[#E8DEC8] dark:border-[#2E3440] mt-4 flex flex-col sm:flex-row items-center justify-between gap-3">
                   <div className="flex items-center gap-2">
                     <button
-                      onClick={() => toggleManualOverride(studentKey)}
+                      onClick={() => {
+                        if (typeof toggleManualOverride === 'function') {
+                          toggleManualOverride(studentKey);
+                        }
+                      }}
                       className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
                         isOverridden
                           ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/30'
