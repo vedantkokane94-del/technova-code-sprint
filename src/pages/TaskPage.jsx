@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useApp } from '../context/AppContext';
 import { getTaskVariant } from '../utils/hash';
-import { getSprintDaySchedule, getDayUnlockTimeUtc, isDayUnlocked } from '../data/tasksSeed';
+import { getSprintDaySchedule, getDayUnlockTimeUtc, isDayUnlocked, TASKS } from '../data/tasksSeed';
 import { evaluateCodeSubmission, SUPPORTED_LANGUAGES, checkRequiredConcepts } from '../utils/codeJudge';
 import { QUIZ_QUESTIONS } from '../data/quizSeed';
 import { DAY_POINTS, formatScore, toScoreNumber } from '../utils/scoring';
@@ -57,8 +57,9 @@ export const TaskPage = ({ dayNumber, setCurrentTab }) => {
     examSettings
   } = useApp();
 
-  const task = tasks.find(t => t.day === dayNumber) || tasks[0];
-  const assignedVariantKey = getTaskVariant(user?.uid, task.day);
+  const taskList = (tasks && tasks.length > 0) ? tasks : TASKS;
+  const task = taskList.find(t => t.day === dayNumber) || taskList[0];
+  const assignedVariantKey = getTaskVariant(user?.uid, task?.day || dayNumber);
   const maxDayPoints = DAY_POINTS[task.day] || 10;
   const maxProgramPoints = maxDayPoints * 0.70;
   const maxQuizPoints = maxDayPoints * 0.30;
@@ -509,30 +510,24 @@ export const TaskPage = ({ dayNumber, setCurrentTab }) => {
     };
   }, [isAdmin, user, testExitRecord, quizOpen]);
 
-  // Section 3: Tab / Window Switching Detection (visibilitychange & blur) -> Immediate Auto-Exit
+  // Section 3: Tab / Window Switching Detection (Graceful during coding, strict during quiz)
   useEffect(() => {
     if (isAdmin || user?.role === 'admin' || testExitRecord) return;
 
     const handleVisibility = () => {
       if (document.hidden) {
         setTabSwitches(prev => prev + 1);
-        handleAutoExit("Exited: tab switch", quizOpen ? 'quiz' : 'all');
+        if (quizOpen) {
+          handleAutoExit("Exited: tab switch during quiz", 'quiz');
+        }
       }
     };
 
-    const handleBlur = () => {
-      setTabSwitches(prev => prev + 1);
-      handleAutoExit("Exited: tab switch (window blur)", quizOpen ? 'quiz' : 'all');
-    };
-
     document.addEventListener('visibilitychange', handleVisibility);
-    window.addEventListener('blur', handleBlur);
-
     return () => {
       document.removeEventListener('visibilitychange', handleVisibility);
-      window.removeEventListener('blur', handleBlur);
     };
-  }, [isAdmin, user, testExitRecord, quizOpen, code, selectedLanguage, evaluationResult, existingSub, attemptsUsed, tabSwitches, fullScreenExits, proctoringFlagsCount, quizScoreEarned, quizCorrectCount]);
+  }, [isAdmin, user, testExitRecord, quizOpen]);
 
   // Section 3: Fullscreen exit tracking -> Immediate Auto-Exit
   useEffect(() => {
@@ -671,6 +666,11 @@ export const TaskPage = ({ dayNumber, setCurrentTab }) => {
       return;
     }
     if (areControlsDisabled) return;
+    const hasSubmittedProgram = attemptsUsed > 0 || Boolean(existingSub?.code || existingSub?.programScore !== undefined);
+    if (!hasSubmittedProgram) {
+      alert("Please submit your program code at least once before taking the daily quiz.");
+      return;
+    }
     if (isQuizDisqualified) {
       alert(`You are disqualified from taking the Day ${task.day} quiz.`);
       return;
@@ -808,21 +808,27 @@ export const TaskPage = ({ dayNumber, setCurrentTab }) => {
             <Lock className="w-7 h-7" />
           </div>
           <h2 className="text-xl font-extrabold text-[#1A1A1A] dark:text-white">
-            {user?.suspended ? 'Account Suspended' : 'Verified Student Account Required'}
+            {user?.suspended ? 'Account Suspended' : 'Student Account Required'}
           </h2>
           <p className="text-xs text-gray-500 mt-2 mb-6">
             {user?.suspended
               ? 'Your account has been suspended by the administrator.'
-              : 'You must complete student registration and verify your 6-digit email OTP before accessing daily tasks or submitting programs.'}
+              : 'You must complete student registration before accessing daily tasks or submitting programs.'}
           </p>
           {!user?.suspended && (
             <button
               onClick={() => setCurrentTab('register')}
-              className="w-full py-3 px-6 rounded-xl font-bold bg-[#B3122B] text-white hover:bg-[#8B0D20] text-sm cursor-pointer"
+              className="w-full py-3 px-6 rounded-xl font-bold bg-[#B3122B] text-white hover:bg-[#8B0D20] text-sm cursor-pointer mb-3"
             >
-              Complete Registration & Verify OTP →
+              Complete Registration →
             </button>
           )}
+          <button
+            onClick={() => setCurrentTab('dashboard')}
+            className="w-full py-2.5 px-6 rounded-xl font-semibold bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 text-xs cursor-pointer"
+          >
+            Back to dashboard
+          </button>
         </div>
       </div>
     );
@@ -840,16 +846,7 @@ export const TaskPage = ({ dayNumber, setCurrentTab }) => {
 
     return (
       <div className="min-h-screen bg-[#FCF9F2] dark:bg-[#0F1115] py-16 px-4 flex items-center justify-center relative">
-        {/* Mandatory Pre-Check Gate: Browser Check, Real Consent, Permissions, Liveness & Session Minting */}
-        {!isPreCheckPassed && !isAdmin && (
-          <TaskPreCheckGate
-            dayNumber={task.day}
-            user={user}
-            isOpen={!isPreCheckPassed}
-            onComplete={handlePreCheckComplete}
-            onCancel={() => setCurrentTab('dashboard')}
-          />
-        )}
+
 
         <div className="max-w-xl w-full bg-white dark:bg-[#181B20] p-8 sm:p-10 rounded-3xl border border-[#E8DEC8] dark:border-[#2E3440] text-center shadow-xl space-y-6">
           <div className="w-16 h-16 rounded-3xl bg-[#B3122B]/10 text-[#B3122B] dark:text-[#ff8a9e] flex items-center justify-center mx-auto shadow-inner">
@@ -1031,9 +1028,12 @@ export const TaskPage = ({ dayNumber, setCurrentTab }) => {
               <h1 className="text-2xl sm:text-3xl font-extrabold text-[#1A1A1A] dark:text-white">
                 {task.title}
               </h1>
-              <p className="text-xs text-gray-500 mt-1">
-                Assigned Hash Variant: <strong className="text-[#B3122B]">Variant {assignedVariantKey}</strong> (Deterministic via User ID)
-              </p>
+              <div className="mt-1 flex items-center gap-2">
+                <span className="text-xs text-gray-500">Problem Version:</span>
+                <span className="px-2.5 py-0.5 rounded-full bg-[#B3122B]/10 dark:bg-[#B3122B]/20 text-[#B3122B] dark:text-[#ff8a9e] font-bold text-xs border border-[#B3122B]/20">
+                  Your version: {assignedVariantKey}
+                </span>
+              </div>
             </div>
           </div>
 
@@ -1059,6 +1059,94 @@ export const TaskPage = ({ dayNumber, setCurrentTab }) => {
                 <div className="text-sm font-mono font-bold text-[#1A1A1A] dark:text-white">
                   {String(timeLeft.hours).padStart(2, '0')}:{String(timeLeft.minutes).padStart(2, '0')}:{String(timeLeft.seconds).padStart(2, '0')}
                 </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* 4-Step Checklist (Requirement 2.2) */}
+        <div className="bg-white dark:bg-[#181B20] p-4 sm:p-5 rounded-3xl border border-[#E8DEC8] dark:border-[#2E3440] shadow-sm mb-8">
+          <div className="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-3 flex items-center justify-between">
+            <span className="flex items-center gap-2 text-[#1A1A1A] dark:text-white font-extrabold text-sm">
+              <CheckCircle2 className="w-4 h-4 text-[#B3122B]" />
+              Day {task.day} 4-Step Checklist
+            </span>
+            <span className="text-[11px] font-semibold text-gray-500">
+              Steps 1-3 unlock Quiz
+            </span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            {/* Step 1: Read the task */}
+            <div className="p-3.5 rounded-2xl border bg-emerald-500/10 border-emerald-500/30 text-emerald-800 dark:text-emerald-300 flex items-start gap-2.5 text-xs">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+              <div>
+                <span className="font-bold">1. Read the task</span>
+                <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">Objective and constraints loaded</p>
+              </div>
+            </div>
+
+            {/* Step 2: Write and run your code */}
+            <div className={`p-3.5 rounded-2xl border flex items-start gap-2.5 text-xs ${
+              (sampleRunResult || attemptsUsed > 0 || existingSub)
+                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-800 dark:text-emerald-300'
+                : 'bg-blue-500/10 border-blue-500/30 text-blue-800 dark:text-blue-300'
+            }`}>
+              {(sampleRunResult || attemptsUsed > 0 || existingSub) ? (
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+              ) : (
+                <Play className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+              )}
+              <div>
+                <span className="font-bold">2. Write & run code</span>
+                <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
+                  {(sampleRunResult || attemptsUsed > 0 || existingSub) ? 'Code tested with sample cases' : 'Run sample test cases in editor'}
+                </p>
+              </div>
+            </div>
+
+            {/* Step 3: Submit */}
+            <div className={`p-3.5 rounded-2xl border flex items-start gap-2.5 text-xs ${
+              (attemptsUsed > 0 || existingSub)
+                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-800 dark:text-emerald-300'
+                : 'bg-[#FCF9F2] dark:bg-[#15181E] border-[#E8DEC8] dark:border-[#2E3440] text-gray-700 dark:text-gray-300'
+            }`}>
+              {(attemptsUsed > 0 || existingSub) ? (
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+              ) : (
+                <Send className="w-4 h-4 text-gray-400 shrink-0 mt-0.5" />
+              )}
+              <div>
+                <span className="font-bold">3. Submit program</span>
+                <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
+                  {(attemptsUsed > 0 || existingSub) ? `${attemptsUsed || 1}/3 attempts evaluated` : 'Submit once to unlock daily quiz'}
+                </p>
+              </div>
+            </div>
+
+            {/* Step 4: Take the quiz */}
+            <div className={`p-3.5 rounded-2xl border flex items-start gap-2.5 text-xs ${
+              quizSubmitted
+                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-800 dark:text-emerald-300'
+                : (attemptsUsed > 0 || existingSub)
+                ? 'bg-amber-500/10 border-amber-500/30 text-amber-800 dark:text-amber-300'
+                : 'bg-gray-100/60 dark:bg-[#14171C] border-[#E8DEC8]/50 dark:border-[#2E3440] text-gray-400 opacity-80'
+            }`}>
+              {quizSubmitted ? (
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+              ) : (attemptsUsed > 0 || existingSub) ? (
+                <HelpCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+              ) : (
+                <Lock className="w-4 h-4 text-gray-400 shrink-0 mt-0.5" />
+              )}
+              <div>
+                <span className="font-bold">4. Take the quiz</span>
+                <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
+                  {quizSubmitted 
+                    ? `${quizCorrectCount}/8 correct (+${formatScore(quizScoreEarned)} pts)` 
+                    : (attemptsUsed > 0 || existingSub) 
+                    ? 'Unlocked (8 multiple choice questions)' 
+                    : 'Locked until program submitted'}
+                </p>
               </div>
             </div>
           </div>
@@ -1151,7 +1239,7 @@ export const TaskPage = ({ dayNumber, setCurrentTab }) => {
             <div className="p-4 rounded-2xl bg-[#B3122B]/5 dark:bg-[#B3122B]/15 border border-[#B3122B]/20">
               <div className="flex items-center gap-2 text-xs font-black text-[#B3122B] dark:text-[#ff8a9e] uppercase">
                 <Sparkles className="w-4 h-4" />
-                <span>Your Assigned Variant: Variant {assignedVariantKey}</span>
+                <span>Your version: {assignedVariantKey}</span>
               </div>
               <p className="text-sm text-[#1A1A1A] dark:text-white font-semibold mt-1">
                 {task.variants?.[assignedVariantKey]?.instruction || "Implement the algorithm adhering strictly to standard input and output format."}
@@ -1461,6 +1549,17 @@ export const TaskPage = ({ dayNumber, setCurrentTab }) => {
                   >
                     <XCircle className="w-4 h-4 text-red-600" />
                     <span>Disqualified from Quiz (0.0 pts)</span>
+                  </button>
+                </div>
+              ) : !(attemptsUsed > 0 || Boolean(existingSub?.code || existingSub?.programScore !== undefined)) ? (
+                <div className="flex items-center gap-2">
+                  <button
+                    disabled
+                    className="px-5 py-2.5 rounded-xl text-xs font-bold bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-gray-700 flex items-center gap-2 cursor-not-allowed"
+                    title="Submit your program code first to unlock the quiz"
+                  >
+                    <Lock className="w-3.5 h-3.5 text-gray-400" />
+                    <span>Quiz Locked (Submit program first)</span>
                   </button>
                 </div>
               ) : (

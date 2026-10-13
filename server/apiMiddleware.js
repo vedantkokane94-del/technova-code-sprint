@@ -116,7 +116,6 @@ function checkScopedRateLimit(store, key, maxAttempts, windowMs) {
 function isStudentEligibleForActiveAccess(student) {
   if (!student) return true;
   if (student.suspended || student.accountStatus === 'suspended') return false;
-  if (student.accountStatus === 'unverified') return false;
   return true;
 }
 
@@ -2361,85 +2360,39 @@ export function createApiMiddleware() {
         }
       }
 
-      // 8. Check 60-second resend cooldown & per-email OTP rate limit
-      store.pendingVerifications = store.pendingVerifications || {};
-      const existingPending = store.pendingVerifications[sanitized.prn];
-      if (existingPending && existingPending.lastSentAt && !body.bypassCooldown) {
-        const elapsedSinceLastOtp = now - existingPending.lastSentAt;
-        if (elapsedSinceLastOtp < 60 * 1000 && existingPending.normalizedEmail === sanitized.normalizedEmail) {
-          const waitSec = Math.ceil((60 * 1000 - elapsedSinceLastOtp) / 1000);
-          return sendJson(429, {
-            error: `An OTP was recently sent to ${sanitized.email}. Please wait ${waitSec}s before requesting another code.`,
-            retryAfterSeconds: waitSec
-          });
-        }
-      }
-
-      const emailOtpRate = checkScopedRateLimit(store, `otp_send:${sanitized.normalizedEmail}`, 5, 15 * 60 * 1000);
-      if (!emailOtpRate.allowed) {
-        saveStore(store);
-        return sendJson(429, {
-          error: `Too many OTP requests for ${sanitized.email}. Please wait ${emailOtpRate.retryAfterSeconds}s before retrying.`,
-          retryAfterSeconds: emailOtpRate.retryAfterSeconds
-        });
-      }
-
-      // 9. Generate 6-digit OTP and store ONLY its cryptographic HMAC-SHA256 hash
-      const emailOtp = generateSixDigitOtp();
-      const emailOtpHash = hashOtp(sanitized.normalizedEmail, emailOtp);
-
-      store.pendingVerifications[sanitized.prn] = {
-        prn: sanitized.prn,
-        name: sanitized.name,
-        email: sanitized.email,
-        normalizedEmail: sanitized.normalizedEmail,
-        phone: sanitized.phone,
-        branch: sanitized.branch,
-        year: sanitized.year,
-        division: sanitized.division,
-        track: sanitized.track,
-        language: sanitized.language,
-        emailOtpHash,
-        emailAttempts: 0,
-        maxAttempts: 5,
-        emailExpiresAt: now + 10 * 60 * 1000, // 10 minutes
-        lastSentAt: now,
-        emailVerified: false,
-        phoneOtpHash: null,
-        phoneAttempts: 0,
-        phoneExpiresAt: 0,
-        phoneLastSentAt: 0,
-        phoneVerified: false,
-        isLegacyUpgrade
-      };
-
-      // 10. Create or update student record in store.students
+      // 8. Create or update student record directly in store.students (Single-step registration without OTP)
       const cleanPrnId = sanitized.prn.replace(/[^A-Z0-9]/gi, '').toUpperCase();
       const existingStuIdx = store.students.findIndex(
         s => String(s.prn || '').trim().toUpperCase() === sanitized.prn
       );
 
+      let student;
       if (existingStuIdx >= 0) {
         const prevStu = store.students[existingStuIdx];
-        store.students[existingStuIdx] = {
+        student = {
           ...prevStu,
           name: sanitized.name,
           email: sanitized.email,
           normalizedEmail: sanitized.normalizedEmail,
           phone: sanitized.phone,
           branch: sanitized.branch,
+          branchCode: sanitized.branchCode,
+          branchLabel: sanitized.branchLabel,
           year: sanitized.year,
           division: sanitized.division,
           track: sanitized.track,
           language: sanitized.language,
           genuineConsent: true,
           consentTimestamp: new Date(now).toISOString(),
-          // Preserve legacy_active status for existing students until they finish verifying so their data stays intact
-          accountStatus: isLegacyUpgrade && prevStu.accountStatus !== 'unverified' ? 'legacy_active' : 'unverified',
+          emailVerified: true,
+          phoneVerified: true,
+          accountStatus: 'verified',
+          needsLegacyVerification: false,
           updatedAt: new Date(now).toISOString()
         };
+        store.students[existingStuIdx] = student;
       } else {
-        store.students.push({
+        student = {
           uid: `svit-stu-${cleanPrnId}`,
           prn: sanitized.prn,
           name: sanitized.name,
@@ -2447,40 +2400,55 @@ export function createApiMiddleware() {
           normalizedEmail: sanitized.normalizedEmail,
           phone: sanitized.phone,
           branch: sanitized.branch,
+          branchCode: sanitized.branchCode,
+          branchLabel: sanitized.branchLabel,
           year: sanitized.year,
           division: sanitized.division,
           track: sanitized.track,
           language: sanitized.language,
           role: 'student',
-          emailVerified: false,
-          phoneVerified: false,
-          accountStatus: 'unverified',
+          emailVerified: true,
+          phoneVerified: true,
+          accountStatus: 'verified',
           genuineConsent: true,
           consentTimestamp: new Date(now).toISOString(),
           registeredAt: new Date(now).toISOString(),
           updatedAt: new Date(now).toISOString()
-        });
+        };
+        store.students.push(student);
       }
+
+      const sessionToken = createStudentSessionToken(student);
+      student.sessionToken = sessionToken;
+
+      // Sync any submissions matching PRN or UID
+      store.submissions = (store.submissions || []).map(sub => {
+        if (String(sub.prn || '').trim().toUpperCase() === sanitized.prn || sub.userId === student.uid) {
+          return {
+            ...sub,
+            userId: student.uid,
+            prn: sanitized.prn,
+            studentName: student.name,
+            language: sub.language || student.language,
+            track: sub.track || student.track,
+            branch: student.branch
+          };
+        }
+        return sub;
+      });
 
       saveStore(store);
 
-      const emailDispatch = await sendVerificationEmailOtp({
-        toEmail: sanitized.email,
-        studentName: sanitized.name,
-        otpCode: emailOtp
-      });
-
       return sendJson(200, {
         success: true,
-        step: 'verify_email',
-        prn: sanitized.prn,
-        email: sanitized.email,
-        phone: sanitized.phone,
-        expiresInSeconds: 600,
-        resendCooldownSeconds: 60,
-        phoneVerificationRequired: Boolean(regSettings.phoneVerificationRequired),
-        deliveryMode: emailDispatch.provider,
-        ...(emailDispatch.simulated ? { sandboxOtp: emailOtp } : {})
+        step: 'done',
+        sessionToken,
+        user: decorateStudentForClient(student),
+        students: store.students
+          .filter(s => isStudentEligibleForActiveAccess(s))
+          .map(s => decorateStudentForClient(s)),
+        submissions: store.submissions,
+        leaderboard: computeSharedLeaderboard(store)
       });
     }
 
@@ -2832,13 +2800,9 @@ export function createApiMiddleware() {
       }
 
       if (existingStudent.accountStatus === 'unverified') {
-        return sendJson(403, {
-          error: 'Your email verification is pending. Please verify the 6-digit OTP sent to your email to activate your account.',
-          requiresVerification: true,
-          prn: existingStudent.prn,
-          email: existingStudent.email,
-          phone: existingStudent.phone || ''
-        });
+        existingStudent.accountStatus = 'verified';
+        existingStudent.emailVerified = true;
+        existingStudent.phoneVerified = true;
       }
 
       // Allow track update if explicitly passed during profile sync
@@ -2893,10 +2857,7 @@ export function createApiMiddleware() {
 
       if (stuIdx >= 0 && !isStudentEligibleForActiveAccess(store.students[stuIdx])) {
         return sendJson(403, {
-          error:
-            store.students[stuIdx].accountStatus === 'unverified'
-              ? 'Unverified accounts cannot submit programs or quizzes. Please verify your email OTP first.'
-              : 'Suspended accounts cannot submit programs or quizzes.'
+          error: 'Suspended accounts cannot submit programs or quizzes.'
         });
       }
 

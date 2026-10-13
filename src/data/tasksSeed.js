@@ -245,3 +245,5 @@ export const SEED_TASKS = [
     }
   }
 ];
+
+export const TASKS = SEED_TASKS;

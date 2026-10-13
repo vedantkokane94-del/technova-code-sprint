@@ -10,7 +10,7 @@ import { AdminPage } from './pages/AdminPage';
 import { AdminLoginPage } from './pages/AdminLoginPage';
 import { MyCertificatePage } from './pages/MyCertificatePage';
 import { VerifyCertificatePage } from './pages/VerifyCertificatePage';
-import { ErrorBoundary } from './components/ErrorBoundary';
+import { ErrorBoundary, PageErrorBoundary } from './components/ErrorBoundary';
 import { SVITHubLogo, DurgaMataSketch, ShaktiVidyaWatermark } from './components/BrandLogo';
 
 function SprintApp() {
@@ -106,68 +106,61 @@ function SprintApp() {
 
       <main className="flex-1 relative">
         {currentTab === 'landing' && (
-          <LandingPage setCurrentTab={setCurrentTab} />
+          <PageErrorBoundary pageName="landing" onBackToDashboard={() => setCurrentTab('landing')}>
+            <LandingPage setCurrentTab={setCurrentTab} />
+          </PageErrorBoundary>
         )}
 
         {currentTab === 'register' && (
-          <RegisterPage setCurrentTab={setCurrentTab} />
+          <PageErrorBoundary pageName="register" onBackToDashboard={() => setCurrentTab('dashboard')}>
+            <RegisterPage setCurrentTab={setCurrentTab} />
+          </PageErrorBoundary>
         )}
 
         {currentTab === 'dashboard' && (
-          <DashboardPage 
-            setCurrentTab={setCurrentTab} 
-            setSelectedDay={setSelectedDay} 
-          />
+          <PageErrorBoundary pageName="dashboard" onBackToDashboard={() => setCurrentTab('dashboard')}>
+            <DashboardPage 
+              setCurrentTab={setCurrentTab} 
+              setSelectedDay={setSelectedDay} 
+            />
+          </PageErrorBoundary>
         )}
 
         {currentTab === 'task' && (
-          <TaskPage 
-            dayNumber={selectedDay} 
-            setCurrentTab={setCurrentTab} 
-          />
+          <PageErrorBoundary pageName="task" onBackToDashboard={() => setCurrentTab('dashboard')}>
+            <TaskPage 
+              dayNumber={selectedDay} 
+              setCurrentTab={setCurrentTab} 
+            />
+          </PageErrorBoundary>
         )}
 
         {currentTab === 'leaderboard' && (
-          <LeaderboardPage />
+          <PageErrorBoundary pageName="leaderboard" onBackToDashboard={() => setCurrentTab('dashboard')}>
+            <LeaderboardPage />
+          </PageErrorBoundary>
         )}
 
         {currentTab === 'my-certificate' && (
-          <MyCertificatePage setCurrentTab={setCurrentTab} />
+          <PageErrorBoundary pageName="my-certificate" onBackToDashboard={() => setCurrentTab('dashboard')}>
+            <MyCertificatePage setCurrentTab={setCurrentTab} />
+          </PageErrorBoundary>
         )}
 
         {currentTab === 'verify' && (
-          <VerifyCertificatePage 
-            certificateId={verifyCertId} 
-            onBack={() => {
-              setCurrentTab('landing');
-              window.history.pushState(null, '', '/');
-            }}
-          />
+          <PageErrorBoundary pageName="verify" onBackToDashboard={() => setCurrentTab('dashboard')}>
+            <VerifyCertificatePage 
+              certificateId={verifyCertId} 
+              onBack={() => {
+                setCurrentTab('landing');
+                window.history.pushState(null, '', '/');
+              }}
+            />
+          </PageErrorBoundary>
         )}
 
         {currentTab === 'admin-login' && (
-          <AdminLoginPage 
-            onLoginSuccess={() => {
-              setCurrentTab('admin');
-              window.history.pushState(null, '', '/admin');
-            }}
-            onNavigateHome={() => {
-              setCurrentTab('landing');
-              window.history.pushState(null, '', '/');
-            }}
-          />
-        )}
-
-        {currentTab === 'admin' && (
-          isSessionLoading ? (
-            <div className="min-h-[50vh] flex flex-col items-center justify-center p-8 text-center">
-              <div className="w-12 h-12 rounded-full border-4 border-[#8B0D20]/20 border-t-[#8B0D20] animate-spin mb-4" />
-              <h3 className="text-sm font-bold text-[#1A1A1A] dark:text-white">Verifying Administrator Session...</h3>
-              <p className="text-xs text-gray-500 mt-1">Checking secure session credentials with the server</p>
-            </div>
-          ) : isAdmin ? (
-            <AdminPage setCurrentTab={setCurrentTab} />
-          ) : (
+          <PageErrorBoundary pageName="admin-login" onBackToDashboard={() => setCurrentTab('dashboard')}>
             <AdminLoginPage 
               onLoginSuccess={() => {
                 setCurrentTab('admin');
@@ -178,7 +171,32 @@ function SprintApp() {
                 window.history.pushState(null, '', '/');
               }}
             />
-          )
+          </PageErrorBoundary>
+        )}
+
+        {currentTab === 'admin' && (
+          <PageErrorBoundary pageName="admin" onBackToDashboard={() => setCurrentTab('dashboard')}>
+            {isSessionLoading ? (
+              <div className="min-h-[50vh] flex flex-col items-center justify-center p-8 text-center">
+                <div className="w-12 h-12 rounded-full border-4 border-[#8B0D20]/20 border-t-[#8B0D20] animate-spin mb-4" />
+                <h3 className="text-sm font-bold text-[#1A1A1A] dark:text-white">Verifying Administrator Session...</h3>
+                <p className="text-xs text-gray-500 mt-1">Checking secure session credentials with the server</p>
+              </div>
+            ) : isAdmin ? (
+              <AdminPage setCurrentTab={setCurrentTab} />
+            ) : (
+              <AdminLoginPage 
+                onLoginSuccess={() => {
+                  setCurrentTab('admin');
+                  window.history.pushState(null, '', '/admin');
+                }}
+                onNavigateHome={() => {
+                  setCurrentTab('landing');
+                  window.history.pushState(null, '', '/');
+                }}
+              />
+            )}
+          </PageErrorBoundary>
         )}
       </main>
 

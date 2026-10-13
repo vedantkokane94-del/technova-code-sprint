@@ -122,7 +122,7 @@ export const Navbar = ({ currentTab, setCurrentTab }) => {
                   <div className="w-6 h-6 rounded-full bg-[#FCF9F2] text-[#B3122B] border border-[#B3122B]/50 font-black text-[10px] flex items-center justify-center shrink-0 shadow-2xs">
                     {getInitials(user.name)}
                   </div>
-                  <span className="text-xs font-bold text-[#1A1A1A] dark:text-white truncate max-w-[130px] whitespace-nowrap">
+                  <span className="text-xs font-bold text-[#1A1A1A] dark:text-white truncate max-w-[110px] sm:max-w-none whitespace-nowrap">
                     {firstName} - {isAdmin ? 'Admin' : userLanguage}
                   </span>
                 </div>

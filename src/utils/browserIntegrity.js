@@ -320,13 +320,7 @@ export function detectSpoofedUserAgent() {
     }
   }
 
-  // 4. Missing mandatory proctoring web APIs
-  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    flags.push('navigator.mediaDevices.getUserMedia is unavailable');
-  }
-  if (typeof document !== 'undefined' && !document.fullscreenEnabled && !document.documentElement.requestFullscreen) {
-    flags.push('Fullscreen API is not supported in this browser');
-  }
+  // 4. Missing mandatory APIs
   if (typeof document !== 'undefined' && typeof document.hidden === 'undefined' && typeof document.visibilityState === 'undefined') {
     flags.push('Page Visibility API is not supported');
   }
@@ -438,23 +432,20 @@ export async function performBrowserIntegrityCheck() {
     signals.push({ type: 'virtual_camera', detail: virtualCams.reason });
   }
 
-  // 5. Desktop & Allowed Browser Validation
+  // 5. Browser Validation (Permits Chrome, Edge, Firefox, Safari on Desktop and Mobile)
   if (pass) {
-    if (browser.isMobile) {
+    const isSupportedBrowser =
+      allowedBrowsers.includes(browser.name) ||
+      browser.name === 'safari' ||
+      browser.name === 'chrome' ||
+      browser.name === 'edge' ||
+      browser.name === 'firefox';
+
+    if (!isSupportedBrowser) {
       score -= 40;
       pass = false;
-      primaryBlockReason = "Mobile devices and phone browsers are not supported for the Technova Code Sprint. You must use a desktop computer or laptop running Google Chrome, Microsoft Edge, or Mozilla Firefox.";
-      signals.push({ type: 'mobile_device_blocked', detail: 'Mobile device detected' });
-    } else if (!allowedBrowsers.includes(browser.name)) {
-      score -= 40;
-      pass = false;
-      primaryBlockReason = `Unsupported browser (${browser.name.toUpperCase()}). Please open Technova Code Sprint in Google Chrome, Microsoft Edge, or Mozilla Firefox on desktop.`;
+      primaryBlockReason = `Unsupported browser (${browser.name.toUpperCase()}). Please open Technova Code Sprint in Google Chrome, Microsoft Edge, Safari, or Mozilla Firefox.`;
       signals.push({ type: 'unsupported_browser', detail: `Browser: ${browser.name}` });
-    } else if (browser.version > 0 && minVersions[browser.name] && browser.version < minVersions[browser.name]) {
-      score -= 30;
-      pass = false;
-      primaryBlockReason = `Outdated ${browser.name.toUpperCase()} (version ${browser.version}). Minimum required version is ${minVersions[browser.name]}. Please update your browser to proceed.`;
-      signals.push({ type: 'outdated_browser', detail: `Version ${browser.version} < ${minVersions[browser.name]}` });
     }
   }
 

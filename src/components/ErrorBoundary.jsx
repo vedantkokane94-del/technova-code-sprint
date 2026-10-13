@@ -183,3 +183,103 @@ export class ErrorBoundary extends React.Component {
     return this.props.children;
   }
 }
+
+export class PageErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null, errorInfo: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error, errorInfo) {
+    console.error('====================================================');
+    console.error(`[PageErrorBoundary:${this.props.pageName || 'page'}] Uncaught runtime error:`);
+    console.error(error);
+    if (error?.stack) {
+      console.error('Stack trace:\n' + error.stack);
+    }
+    if (errorInfo?.componentStack) {
+      console.error('Component stack:\n' + errorInfo.componentStack);
+    }
+    console.error('====================================================');
+    this.setState({ errorInfo });
+  }
+
+  handleTryAgain = () => {
+    this.setState({ hasError: false, error: null, errorInfo: null });
+  };
+
+  handleBackToDashboard = () => {
+    if (this.props.onBackToDashboard) {
+      this.props.onBackToDashboard();
+    } else {
+      window.location.href = '/';
+    }
+  };
+
+  render() {
+    if (this.state.hasError) {
+      const isTask = this.props.pageName === 'task';
+      const mainMessage = isTask
+        ? "We couldn't open this task. Please try again."
+        : (this.props.friendlyMessage || "We couldn't load this page. Please try again.");
+      const errorText = this.state.error?.message || String(this.state.error || 'Unknown error');
+      const errorStack = this.state.error?.stack || '';
+
+      return (
+        <div className="min-h-[60vh] flex items-center justify-center p-4">
+          <div className="max-w-md w-full bg-white dark:bg-[#181B20] border border-[#E8DEC8] dark:border-[#2E3440] rounded-3xl p-6 sm:p-8 shadow-xl text-center">
+            <div className="w-12 h-12 rounded-2xl bg-red-100 dark:bg-red-950/40 text-[#B3122B] flex items-center justify-center mx-auto mb-4">
+              <AlertTriangle className="w-6 h-6" />
+            </div>
+
+            <h3 className="text-base sm:text-lg font-black text-[#1A1A1A] dark:text-white mb-2">
+              {mainMessage}
+            </h3>
+
+            <p className="text-xs text-gray-500 dark:text-gray-400 mb-5">
+              An unexpected display issue occurred. You can retry opening the view or return to your sprint dashboard.
+            </p>
+
+            <div className="flex flex-col sm:flex-row gap-2.5 justify-center mb-5">
+              <button
+                type="button"
+                onClick={this.handleTryAgain}
+                className="px-5 py-2.5 rounded-xl bg-[#B3122B] hover:bg-[#8B0D20] text-white text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>Try again</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={this.handleBackToDashboard}
+                className="px-5 py-2.5 rounded-xl border border-[#E8DEC8] dark:border-[#2E3440] bg-[#FCF9F2] dark:bg-[#111317] hover:border-[#B3122B] text-gray-700 dark:text-gray-200 text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <Home className="w-3.5 h-3.5" />
+                <span>Back to dashboard</span>
+              </button>
+            </div>
+
+            {/* Technical error text in small grey type for debugging */}
+            <div className="mt-4 pt-3 border-t border-[#E8DEC8]/60 dark:border-[#2E3440] text-left">
+              <div className="text-[10px] uppercase font-bold text-gray-400 mb-1">
+                Technical Error Details:
+              </div>
+              <div className="p-2.5 rounded-xl bg-gray-50 dark:bg-[#111317] border border-gray-200 dark:border-gray-800 text-[11px] font-mono text-gray-400 max-h-32 overflow-y-auto whitespace-pre-wrap break-all">
+                {errorText}
+                {errorStack ? `\n\n${errorStack}` : ''}
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+

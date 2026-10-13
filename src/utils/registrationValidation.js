@@ -5,15 +5,45 @@ import { isDisposableEmailDomain } from '../data/disposableDomains.js';
  * Technova Code Sprint: 9 Days to Build — SVIT Nashik
  */
 
-export const VALID_BRANCHES = [
-  'Computer Engineering',
-  'Information Technology',
-  'ECE',
-  'Chemical Engineering',
-  'Mechanical Engineering',
-  'Civil Engineering',
-  'AI & Data Science'
+export const ALLOWED_BRANCHES = [
+  { code: 'ECE', label: 'Electronics and Communication (ECE)' },
+  { code: 'IT', label: 'Information Technology (IT)' },
+  { code: 'COMP', label: 'Computer Engineering' },
+  { code: 'CHEM', label: 'Chemical Engineering' }
 ];
+
+export const VALID_BRANCH_CODES = ['ECE', 'IT', 'COMP', 'CHEM'];
+
+export const BRANCH_CODE_TO_LABEL = {
+  ECE: 'Electronics and Communication (ECE)',
+  IT: 'Information Technology (IT)',
+  COMP: 'Computer Engineering',
+  CHEM: 'Chemical Engineering'
+};
+
+export function getBranchLabel(codeOrName) {
+  if (!codeOrName) return '';
+  const trimmed = String(codeOrName).trim();
+  const upper = trimmed.toUpperCase();
+  if (BRANCH_CODE_TO_LABEL[upper]) return BRANCH_CODE_TO_LABEL[upper];
+  const found = ALLOWED_BRANCHES.find(b => b.label.toLowerCase() === trimmed.toLowerCase());
+  if (found) return found.label;
+  return trimmed;
+}
+
+export function normalizeBranchCode(codeOrName) {
+  if (!codeOrName) return null;
+  const trimmed = String(codeOrName).trim();
+  const upper = trimmed.toUpperCase();
+  if (VALID_BRANCH_CODES.includes(upper)) return upper;
+  if (/^electronics\s*(?:and|&)\s*communication(?:\s*\(ece\))?$/i.test(trimmed) || /^ece$/i.test(trimmed)) return 'ECE';
+  if (/^information\s*technology(?:\s*\(it\))?$/i.test(trimmed) || /^it$/i.test(trimmed)) return 'IT';
+  if (/^computer(?:\s*engineering)?$/i.test(trimmed) || /^comp$/i.test(trimmed) || /^cse$/i.test(trimmed)) return 'COMP';
+  if (/^chemical(?:\s*engineering)?$/i.test(trimmed) || /^chem$/i.test(trimmed)) return 'CHEM';
+  return null;
+}
+
+export const VALID_BRANCHES = ALLOWED_BRANCHES.map(b => b.label);
 
 export const VALID_YEARS = [
   'First Year (FE)',
@@ -474,9 +504,10 @@ export function validateRegistrationPayload(payload = {}, options = {}) {
   const prnCheck = validateRollNumber(payload.prn);
   if (!prnCheck.valid) errors.prn = prnCheck.error;
 
-  const branch = String(payload.branch || '').trim();
-  if (!VALID_BRANCHES.includes(branch)) {
-    errors.branch = 'Please select a valid Department / Branch.';
+  const rawBranch = String(payload.branch || '').trim();
+  const normalizedBranch = normalizeBranchCode(rawBranch);
+  if (!normalizedBranch) {
+    errors.branch = 'Please choose one of the available branches.';
   }
 
   const year = String(payload.year || '').trim();
@@ -507,9 +538,9 @@ export function validateRegistrationPayload(payload = {}, options = {}) {
     emailDomain: emailCheck.domain,
     phone: phoneCheck.phone,
     phoneDigits: phoneCheck.digits,
-    prn: prnCheck.prn,
-    branch,
-    year,
+    branch: normalizedBranch || rawBranch,
+    branchCode: normalizedBranch || rawBranch,
+    branchLabel: getBranchLabel(normalizedBranch || rawBranch),
     division,
     language: matchedTrack || 'Python',
     track: matchedTrack || 'Python',

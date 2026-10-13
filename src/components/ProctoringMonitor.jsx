@@ -119,10 +119,7 @@ export const ProctoringMonitor = ({
         setInGracePeriod(true);
         if (onStatusChange) onStatusChange(false, true);
 
-        // Critical: Camera and mic are mandatory. If denied, trigger disconnect
-        if (onDeviceDisconnected) {
-          onDeviceDisconnected(`Camera/Microphone permission denied: ${err.name || 'NotAllowedError'}`);
-        }
+        // Media permission denied or device not found: stay in grace mode without auto-exiting
       }
     }
 
