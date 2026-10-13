@@ -3078,6 +3078,8 @@ export const AdminPage = ({ setCurrentTab }) => {
                       </span>
                       <button
                         onClick={() => {
+                          const targetVersion = templateConfig?.templateVersion || 'v2_premium';
+                          updateTemplateConfig({ templateVersion: targetVersion });
                           approveCertificateTemplate(user?.name || "Vedant Kokane (Faculty Admin)");
                           setAdminToast("Certificate Template approved and locked! Ready for student dispatch.");
                           setTimeout(() => setAdminToast(''), 4000);
@@ -3140,6 +3142,92 @@ export const AdminPage = ({ setCurrentTab }) => {
                   </span>
                 </div>
               )}
+            </div>
+
+            {/* Template Design Version Switcher (1-Click Toggle) */}
+            <div className="bg-white dark:bg-[#181B20] p-5 rounded-3xl border border-[#E8DEC8] dark:border-[#2E3440] shadow-xs">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+                <div>
+                  <h4 className="font-extrabold text-sm text-[#1A1A1A] dark:text-white flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-[#B3122B]" />
+                    <span>Certificate Visual Template Design Version</span>
+                  </h4>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    Switch between the new Premium 2026 design and previous Classic design with one click.
+                  </p>
+                </div>
+                <span className="text-xs font-mono font-bold px-2.5 py-1 rounded-lg bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300">
+                  Active: {templateConfig?.templateVersion === 'v1_classic' ? 'v1_classic (Classic)' : 'v2_premium (Premium 2026)'}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Option 1: Premium 2026 (New Official Design) */}
+                <div
+                  onClick={() => {
+                    if (!templateConfig?.isApproved) {
+                      updateTemplateConfig({ templateVersion: 'v2_premium' });
+                      setAdminToast("Selected: Premium 2026 Design (v2_premium)");
+                      setTimeout(() => setAdminToast(''), 3000);
+                    }
+                  }}
+                  className={`p-4 rounded-2xl border-2 transition-all cursor-pointer relative ${
+                    templateConfig?.templateVersion !== 'v1_classic'
+                      ? 'border-[#B3122B] bg-[#B3122B]/5 shadow-sm'
+                      : 'border-[#E8DEC8] dark:border-[#2E3440] hover:border-[#B3122B]/50 bg-white dark:bg-[#14171C]'
+                  } ${templateConfig?.isApproved ? 'opacity-90 cursor-default' : ''}`}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <span className="font-black text-sm text-[#1A1A1A] dark:text-white">
+                        Premium 2026 Design (v2_premium)
+                      </span>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20">
+                        Recommended • New Official
+                      </span>
+                    </div>
+                    {templateConfig?.templateVersion !== 'v1_classic' && (
+                      <CheckCircle2 className="w-4 h-4 text-[#B3122B]" />
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-600 dark:text-gray-400 leading-relaxed">
+                    3-layer red and gold frames (16pt, 25pt, 31pt inset), 4 corner concentric gold arcs with center dots, top-center Durga Mata crest, left 9-DAYS badge, gold diamond divider, and bottom-center Pravara seal.
+                  </p>
+                </div>
+
+                {/* Option 2: Classic 2026 Design */}
+                <div
+                  onClick={() => {
+                    if (!templateConfig?.isApproved) {
+                      updateTemplateConfig({ templateVersion: 'v1_classic' });
+                      setAdminToast("Selected: Classic 2026 Design (v1_classic)");
+                      setTimeout(() => setAdminToast(''), 3000);
+                    }
+                  }}
+                  className={`p-4 rounded-2xl border-2 transition-all cursor-pointer relative ${
+                    templateConfig?.templateVersion === 'v1_classic'
+                      ? 'border-[#B3122B] bg-[#B3122B]/5 shadow-sm'
+                      : 'border-[#E8DEC8] dark:border-[#2E3440] hover:border-[#B3122B]/50 bg-white dark:bg-[#14171C]'
+                  } ${templateConfig?.isApproved ? 'opacity-90 cursor-default' : ''}`}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <span className="font-black text-sm text-[#1A1A1A] dark:text-white">
+                        Classic 2026 Design (v1_classic)
+                      </span>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-gray-500/10 text-gray-700 dark:text-gray-300 border border-gray-500/20">
+                        Legacy Template
+                      </span>
+                    </div>
+                    {templateConfig?.templateVersion === 'v1_classic' && (
+                      <CheckCircle2 className="w-4 h-4 text-[#B3122B]" />
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-600 dark:text-gray-400 leading-relaxed">
+                    Dual red borders (21pt, 30pt inset), top-center crest, standard underline for student name, and footer layout with signatures and college seal.
+                  </p>
+                </div>
+              </div>
             </div>
 
             {/* Hidden File Inputs for 4 PNG Assets */}
@@ -3407,6 +3495,7 @@ export const AdminPage = ({ setCurrentTab }) => {
                   endDate={SPRINT_END_DATE}
                   issueDate={SPRINT_ISSUE_DATE}
                   showDownloadButton={true}
+                  templateConfig={templateConfig}
                 />
               </div>
             </div>

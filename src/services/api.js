@@ -104,14 +104,19 @@ export async function registerAdminDevice(password, deviceName = '', setupKey = 
   }
 }
 
-export async function loginAdminWithEmailAndPassword(email, password) {
+export async function loginAdminWithEmailAndPassword(email, password, name = '') {
   try {
     const fingerprint = collectDeviceFingerprint();
     const headers = await getAdminHeaders();
     const res = await fetch('/api/admin/login', {
       method: 'POST',
       headers,
-      body: JSON.stringify({ email: email.trim().toLowerCase(), password, fingerprint }),
+      body: JSON.stringify({ 
+        email: email.trim().toLowerCase(), 
+        password, 
+        name: name ? name.trim() : undefined,
+        fingerprint 
+      }),
       credentials: 'same-origin'
     });
     const data = await res.json();
@@ -119,8 +124,9 @@ export async function loginAdminWithEmailAndPassword(email, password) {
       return {
         success: false,
         status: res.status,
-        error: data.error || "Authentication failed. Invalid administrator credentials.",
-        attemptsRemaining: data.attemptsRemaining
+        error: data.error || "Admin access denied",
+        attemptsRemaining: data.attemptsRemaining,
+        lockoutSeconds: data.lockoutSeconds
       };
     }
     if (data.csrfToken) {

@@ -57,6 +57,27 @@
     "verificationCount": 0,
     "logs": [
       {
+        "id": "audit-1791901651592-cili",
+        "action": "verify_not_found",
+        "certificateId": "CERT-2026-NONEXISTENT",
+        "timestamp": "2026-10-13T14:27:31.592Z",
+        "clientIp": "127.0.0.1"
+      },
+      {
+        "id": "audit-1791901086559-5k33",
+        "action": "verify_not_found",
+        "certificateId": "CERT-2026-NONEXISTENT",
+        "timestamp": "2026-10-13T14:18:06.559Z",
+        "clientIp": "127.0.0.1"
+      },
+      {
+        "id": "audit-1791900917799-qols",
+        "action": "verify_not_found",
+        "certificateId": "CERT-2026-NONEXISTENT",
+        "timestamp": "2026-10-13T14:15:17.799Z",
+        "clientIp": "127.0.0.1"
+      },
+      {
         "id": "audit-1791897615150-ehkr",
         "action": "verify_not_found",
         "certificateId": "CERT-2026-NONEXISTENT",
@@ -662,6 +683,366 @@
   "adminDevice": null,
   "adminLoginLogs": [
     {
+      "timestamp": "2026-10-13T14:27:31.839Z",
+      "ip": "127.0.0.1",
+      "userAgent": "node",
+      "action": "admin_login",
+      "adminEmail": "technicalteamsvit@gmail.com",
+      "deviceName": "Authorized Administrator Workstation",
+      "success": true,
+      "reason": "authenticated_administrator"
+    },
+    {
+      "timestamp": "2026-10-13T14:27:31.600Z",
+      "ip": "127.0.0.1",
+      "userAgent": "node",
+      "action": "admin_login_attempt",
+      "attemptedEmail": "tec***",
+      "success": false,
+      "reason": "admin_access_denied"
+    },
+    {
+      "timestamp": "2026-10-13T14:27:31.573Z",
+      "ip": "127.0.0.1",
+      "userAgent": "node",
+      "action": "admin_login",
+      "adminEmail": "technicalteamsvit@gmail.com",
+      "deviceName": "Authorized Administrator Workstation",
+      "success": true,
+      "reason": "authenticated_administrator"
+    },
+    {
+      "timestamp": "2026-10-13T14:27:31.333Z",
+      "ip": "127.0.0.1",
+      "userAgent": "node",
+      "action": "admin_login_attempt",
+      "attemptedEmail": "tec***",
+      "success": false,
+      "reason": "admin_access_denied"
+    },
+    {
+      "timestamp": "2026-10-13T14:27:31.096Z",
+      "ip": "127.0.0.1",
+      "userAgent": "node",
+      "action": "admin_login_attempt",
+      "attemptedEmail": "tec***",
+      "success": false,
+      "reason": "admin_access_denied"
+    },
+    {
+      "timestamp": "2026-10-13T14:27:30.862Z",
+      "ip": "127.0.0.1",
+      "userAgent": "node",
+      "action": "admin_login_attempt",
+      "attemptedEmail": "tec***",
+      "success": false,
+      "reason": "admin_access_denied"
+    },
+    {
+      "timestamp": "2026-10-13T14:27:30.628Z",
+      "ip": "127.0.0.1",
+      "userAgent": "node",
+      "action": "admin_login_attempt",
+      "attemptedEmail": "tec***",
+      "success": false,
+      "reason": "admin_access_denied"
+    },
+    {
+      "timestamp": "2026-10-13T14:27:30.393Z",
+      "ip": "127.0.0.1",
+      "userAgent": "node",
+      "action": "admin_login_attempt",
+      "attemptedEmail": "tec***",
+      "success": false,
+      "reason": "admin_access_denied"
+    },
+    {
+      "timestamp": "2026-10-13T14:27:30.156Z",
+      "ip": "127.0.0.1",
+      "userAgent": "node",
+      "action": "admin_login",
+      "adminEmail": "technicalteamsvit@gmail.com",
+      "deviceName": "Authorized Administrator Workstation",
+      "success": true,
+      "reason": "authenticated_administrator"
+    },
+    {
+      "timestamp": "2026-10-13T14:27:29.912Z",
+      "ip": "127.0.0.1",
+      "userAgent": "node",
+      "action": "admin_logout",
+      "success": true,
+      "reason": "admin_session_revoked"
+    },
+    {
+      "timestamp": "2026-10-13T14:27:29.903Z",
+      "ip": "127.0.0.1",
+      "userAgent": "node",
+      "action": "admin_login_attempt",
+      "attemptedEmail": "att***",
+      "success": false,
+      "reason": "admin_access_denied"
+    },
+    {
+      "timestamp": "2026-10-13T14:27:29.660Z",
+      "ip": "127.0.0.1",
+      "userAgent": "node",
+      "action": "admin_login_attempt",
+      "attemptedEmail": "tec***",
+      "success": false,
+      "reason": "admin_access_denied"
+    },
+    {
+      "timestamp": "2026-10-13T14:27:29.409Z",
+      "ip": "127.0.0.1",
+      "userAgent": "node",
+      "action": "admin_login",
+      "adminEmail": "technicalteamsvit@gmail.com",
+      "deviceName": "Authorized Administrator Workstation",
+      "success": true,
+      "reason": "authenticated_administrator"
+    },
+    {
+      "timestamp": "2026-10-13T14:18:06.806Z",
+      "ip": "127.0.0.1",
+      "userAgent": "node",
+      "action": "admin_login",
+      "adminEmail": "technicalteamsvit@gmail.com",
+      "deviceName": "Authorized Administrator Workstation",
+      "success": true,
+      "reason": "authenticated_administrator"
+    },
+    {
+      "timestamp": "2026-10-13T14:18:06.570Z",
+      "ip": "127.0.0.1",
+      "userAgent": "node",
+      "action": "admin_login_attempt",
+      "attemptedEmail": "tec***",
+      "success": false,
+      "reason": "admin_access_denied"
+    },
+    {
+      "timestamp": "2026-10-13T14:18:06.537Z",
+      "ip": "127.0.0.1",
+      "userAgent": "node",
+      "action": "admin_login",
+      "adminEmail": "technicalteamsvit@gmail.com",
+      "deviceName": "Authorized Administrator Workstation",
+      "success": true,
+      "reason": "authenticated_administrator"
+    },
+    {
+      "timestamp": "2026-10-13T14:18:06.299Z",
+      "ip": "127.0.0.1",
+      "userAgent": "node",
+      "action": "admin_login_attempt",
+      "attemptedEmail": "tec***",
+      "success": false,
+      "reason": "admin_access_denied"
+    },
+    {
+      "timestamp": "2026-10-13T14:18:06.061Z",
+      "ip": "127.0.0.1",
+      "userAgent": "node",
+      "action": "admin_login_attempt",
+      "attemptedEmail": "tec***",
+      "success": false,
+      "reason": "admin_access_denied"
+    },
+    {
+      "timestamp": "2026-10-13T14:18:05.825Z",
+      "ip": "127.0.0.1",
+      "userAgent": "node",
+      "action": "admin_login_attempt",
+      "attemptedEmail": "tec***",
+      "success": false,
+      "reason": "admin_access_denied"
+    },
+    {
+      "timestamp": "2026-10-13T14:18:05.589Z",
+      "ip": "127.0.0.1",
+      "userAgent": "node",
+      "action": "admin_login_attempt",
+      "attemptedEmail": "tec***",
+      "success": false,
+      "reason": "admin_access_denied"
+    },
+    {
+      "timestamp": "2026-10-13T14:18:05.350Z",
+      "ip": "127.0.0.1",
+      "userAgent": "node",
+      "action": "admin_login_attempt",
+      "attemptedEmail": "tec***",
+      "success": false,
+      "reason": "admin_access_denied"
+    },
+    {
+      "timestamp": "2026-10-13T14:18:05.114Z",
+      "ip": "127.0.0.1",
+      "userAgent": "node",
+      "action": "admin_login",
+      "adminEmail": "technicalteamsvit@gmail.com",
+      "deviceName": "Authorized Administrator Workstation",
+      "success": true,
+      "reason": "authenticated_administrator"
+    },
+    {
+      "timestamp": "2026-10-13T14:18:04.870Z",
+      "ip": "127.0.0.1",
+      "userAgent": "node",
+      "action": "admin_logout",
+      "success": true,
+      "reason": "admin_session_revoked"
+    },
+    {
+      "timestamp": "2026-10-13T14:18:04.860Z",
+      "ip": "127.0.0.1",
+      "userAgent": "node",
+      "action": "admin_login_attempt",
+      "attemptedEmail": "att***",
+      "success": false,
+      "reason": "admin_access_denied"
+    },
+    {
+      "timestamp": "2026-10-13T14:18:04.627Z",
+      "ip": "127.0.0.1",
+      "userAgent": "node",
+      "action": "admin_login_attempt",
+      "attemptedEmail": "tec***",
+      "success": false,
+      "reason": "admin_access_denied"
+    },
+    {
+      "timestamp": "2026-10-13T14:18:04.380Z",
+      "ip": "127.0.0.1",
+      "userAgent": "node",
+      "action": "admin_login",
+      "adminEmail": "technicalteamsvit@gmail.com",
+      "deviceName": "Authorized Administrator Workstation",
+      "success": true,
+      "reason": "authenticated_administrator"
+    },
+    {
+      "timestamp": "2026-10-13T14:15:18.092Z",
+      "ip": "127.0.0.1",
+      "userAgent": "node",
+      "action": "admin_login",
+      "adminEmail": "technicalteamsvit@gmail.com",
+      "deviceName": "Authorized Administrator Workstation",
+      "success": true,
+      "reason": "authenticated_administrator"
+    },
+    {
+      "timestamp": "2026-10-13T14:15:17.812Z",
+      "ip": "127.0.0.1",
+      "userAgent": "node",
+      "action": "admin_login_attempt",
+      "attemptedEmail": "tec***",
+      "success": false,
+      "reason": "invalid_password"
+    },
+    {
+      "timestamp": "2026-10-13T14:15:17.770Z",
+      "ip": "127.0.0.1",
+      "userAgent": "node",
+      "action": "admin_login",
+      "adminEmail": "technicalteamsvit@gmail.com",
+      "deviceName": "Authorized Administrator Workstation",
+      "success": true,
+      "reason": "authenticated_administrator"
+    },
+    {
+      "timestamp": "2026-10-13T14:15:17.511Z",
+      "ip": "127.0.0.1",
+      "userAgent": "node",
+      "action": "admin_login_attempt",
+      "attemptedEmail": "tec***",
+      "success": false,
+      "reason": "invalid_password"
+    },
+    {
+      "timestamp": "2026-10-13T14:15:17.246Z",
+      "ip": "127.0.0.1",
+      "userAgent": "node",
+      "action": "admin_login_attempt",
+      "attemptedEmail": "tec***",
+      "success": false,
+      "reason": "invalid_password"
+    },
+    {
+      "timestamp": "2026-10-13T14:15:16.994Z",
+      "ip": "127.0.0.1",
+      "userAgent": "node",
+      "action": "admin_login_attempt",
+      "attemptedEmail": "tec***",
+      "success": false,
+      "reason": "invalid_password"
+    },
+    {
+      "timestamp": "2026-10-13T14:15:16.732Z",
+      "ip": "127.0.0.1",
+      "userAgent": "node",
+      "action": "admin_login_attempt",
+      "attemptedEmail": "tec***",
+      "success": false,
+      "reason": "invalid_password"
+    },
+    {
+      "timestamp": "2026-10-13T14:15:16.473Z",
+      "ip": "127.0.0.1",
+      "userAgent": "node",
+      "action": "admin_login_attempt",
+      "attemptedEmail": "tec***",
+      "success": false,
+      "reason": "invalid_password"
+    },
+    {
+      "timestamp": "2026-10-13T14:15:16.236Z",
+      "ip": "127.0.0.1",
+      "userAgent": "node",
+      "action": "admin_login",
+      "adminEmail": "technicalteamsvit@gmail.com",
+      "deviceName": "Authorized Administrator Workstation",
+      "success": true,
+      "reason": "authenticated_administrator"
+    },
+    {
+      "timestamp": "2026-10-13T14:15:15.986Z",
+      "ip": "127.0.0.1",
+      "userAgent": "node",
+      "action": "admin_logout",
+      "success": true,
+      "reason": "admin_session_revoked"
+    },
+    {
+      "timestamp": "2026-10-13T14:15:15.978Z",
+      "ip": "127.0.0.1",
+      "userAgent": "node",
+      "action": "admin_login_attempt",
+      "attemptedEmail": "att***",
+      "success": false,
+      "reason": "invalid_email"
+    },
+    {
+      "timestamp": "2026-10-13T14:15:15.726Z",
+      "ip": "127.0.0.1",
+      "userAgent": "node",
+      "action": "admin_login_attempt",
+      "attemptedEmail": "tec***",
+      "success": false,
+      "reason": "invalid_password"
+    },
+    {
+      "timestamp": "2026-10-13T14:15:15.476Z",
+      "ip": "127.0.0.1",
+      "userAgent": "node",
+      "action": "admin_login",
+      "adminEmail": "technicalteamsvit@gmail.com",
+      "deviceName": "Authorized Administrator Workstation",
+      "success": true,
+      "reason": "authenticated_administrator"
+    },
+    {
       "timestamp": "2026-10-13T13:20:15.453Z",
       "ip": "127.0.0.1",
       "userAgent": "node",
@@ -930,25 +1311,25 @@
   "adminDevices": [],
   "adminSessions": [
     {
-      "sessionId": "e280e657606bc8c0f151b69349bebb81d4762d6b47c7ae8c",
+      "sessionId": "a8d8e7102793b06d36eed23ceed291fe47994d23d37c98c7",
       "email": "technicalteamsvit@gmail.com",
       "deviceTokenHash": null,
-      "createdAt": 1791897613489,
-      "expiresAt": 1791904813489
+      "createdAt": 1791901650155,
+      "expiresAt": 1791905250155
     },
     {
-      "sessionId": "58dac21b559f9581bb731a72a2b03340a8c3c84eb6e4bf8c",
+      "sessionId": "78e742965fb3c22a2e7d255cd7ab6885d9b3a97d0a5f36b0",
       "email": "technicalteamsvit@gmail.com",
       "deviceTokenHash": null,
-      "createdAt": 1791897615117,
-      "expiresAt": 1791904815117
+      "createdAt": 1791901651573,
+      "expiresAt": 1791905251573
     },
     {
-      "sessionId": "25607ca49f6285dab590ba4a9aecf90002a53a42dc03bd6c",
+      "sessionId": "4ba677e4044a0435015cf6c6438edb1c94483e7e0efc70de",
       "email": "technicalteamsvit@gmail.com",
       "deviceTokenHash": null,
-      "createdAt": 1791897615453,
-      "expiresAt": 1791904815453
+      "createdAt": 1791901651839,
+      "expiresAt": 1791905251839
     }
   ],
   "adminIpRateLimits": {},
@@ -957,6 +1338,9 @@
   "adminAuditLogs": [],
   "revokedSessions": [
     "cfdd3eab451376438e57542a9fb0f23377e3c1d5d689bed1",
-    "2c06c5a1f228be5edfad90ca06377dce1e49b7093751b24b"
+    "2c06c5a1f228be5edfad90ca06377dce1e49b7093751b24b",
+    "a43241bacdd7152404829a95791cced6d0e829ca3100cd1c",
+    "43bd75966b9efed7d37ab71d51509e7def49ac5e65489e4b",
+    "f52c41ff6ff95273e0136bd94ba69c1da6ba48886aac82cf"
   ]
 }

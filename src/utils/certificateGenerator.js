@@ -60,6 +60,7 @@ export function sanitizeForPdfFont(text) {
 
 // Default Template Signatories & Assets
 export const DEFAULT_TEMPLATE_CONFIG = {
+  templateVersion: 'v2_premium', // 'v2_premium' (New Premium 2026) | 'v1_classic' (Classic 2026)
   hubLogoUrl: '/hub-logo.png',
   sealUrl: '/college-seal.png',
   secSigUrl: '/signature-technical-secretary.png',
@@ -96,7 +97,7 @@ async function fetchImageBytes(urlOrDataUri) {
 
 /**
  * Generate A4 Landscape (841.89 x 595.28 pt) Certificate PDF using pdf-lib
- * Matches certificate-template.pdf pixel-for-pixel with exact layout, fonts, and colors
+ * Supports both v2_premium (Official 2026 Premium Design) and v1_classic (Classic Design)
  */
 export async function generateCertificatePdf({
   studentName = 'Student Name',
@@ -126,10 +127,10 @@ export async function generateCertificatePdf({
   const height = 595.28;
   const page = pdfDoc.addPage([width, height]);
 
-  // Helper for coordinates: top-down measurement
+  // Coordinate helper: top-down measurement
   const fromTop = (yTop) => height - yTop;
 
-  // 2. Embed Standard Fonts (Times Bold, Times Italic, Helvetica, Helvetica Bold)
+  // 2. Embed Standard Fonts
   const timesBold = await pdfDoc.embedFont(StandardFonts.TimesRomanBold);
   const timesItalic = await pdfDoc.embedFont(StandardFonts.TimesRomanItalic);
   const helvetica = await pdfDoc.embedFont(StandardFonts.Helvetica);
@@ -174,57 +175,6 @@ export async function generateCertificatePdf({
   const qrBytes = await fetchImageBytes(qrDataUrl);
   const qrImg = await pdfDoc.embedPng(qrBytes);
 
-  // Exact Colors
-  const redColor = rgb(179 / 255, 18 / 255, 43 / 255);       // #B3122B
-  const creamColor = rgb(247 / 255, 243 / 255, 236 / 255);   // #F7F3EC
-  const textColor = rgb(26 / 255, 26 / 255, 26 / 255);       // #1A1A1A
-  const greyColor = rgb(85 / 255, 85 / 255, 85 / 255);       // #555555
-  const lineUnderline = rgb(207 / 255, 175 / 255, 168 / 255); // #CFAFA8
-  const blackColor = rgb(0, 0, 0);
-
-  // A. Cream Full-Page Background
-  page.drawRectangle({
-    x: 0,
-    y: 0,
-    width,
-    height,
-    color: creamColor
-  });
-
-  // B. Red Frame: 4.5 pt, inset 21 pt
-  page.drawRectangle({
-    x: 21,
-    y: 21,
-    width: width - 42,
-    height: height - 42,
-    borderColor: redColor,
-    borderWidth: 4.5
-  });
-
-  // C. Thin Red Line: 1.1 pt, inset 30 pt
-  page.drawRectangle({
-    x: 30,
-    y: 30,
-    width: width - 60,
-    height: height - 60,
-    borderColor: redColor,
-    borderWidth: 1.1
-  });
-
-  // D. Hub Logo (94 x 94 pt, centred, top edge 48 pt from top)
-  const logoWidth = 94;
-  const logoHeight = 94;
-  const logoX = (width - logoWidth) / 2;
-  const logoY = fromTop(48 + logoHeight);
-  if (hubLogoImg) {
-    page.drawImage(hubLogoImg, {
-      x: logoX,
-      y: logoY,
-      width: logoWidth,
-      height: logoHeight
-    });
-  }
-
   // Centered text with letter-spacing helper
   const drawCenteredTextWithSpacing = (text, yTopBaseline, font, size, color, letterSpacing = 0) => {
     let totalWidth = 0;
@@ -267,80 +217,421 @@ export async function generateCertificatePdf({
     });
   };
 
-  // E. "TECHNICAL SKILL DEVELOPMENT HUB • SVIT NASHIK"
-  // Helvetica 9.5 pt, grey, letter-spacing 2.2, baseline at 158 pt
-  drawCenteredTextWithSpacing(
-    'TECHNICAL SKILL DEVELOPMENT HUB  •  SVIT NASHIK',
-    158,
-    helvetica,
-    9.5,
-    greyColor,
-    2.2
-  );
-
-  // F. "CERTIFICATE"
-  // Times Bold 44 pt, red, letter-spacing 2.5, baseline at 208 pt
-  drawCenteredTextWithSpacing(
-    'CERTIFICATE',
-    208,
-    timesBold,
-    44,
-    redColor,
-    2.5
-  );
-
-  // G. "OF COMPLETION" / "OF MERIT" / "OF EXCELLENCE & MERIT"
+  // Determine Subtitle by Certificate Type
   const typeSubtitle = type === 'Winner' 
     ? 'OF EXCELLENCE & MERIT' 
     : type === 'Merit' 
     ? 'OF MERIT' 
     : 'OF COMPLETION';
-  drawCenteredTextWithSpacing(
-    typeSubtitle,
-    232,
-    helvetica,
-    12.5,
-    textColor,
-    typeSubtitle.length > 15 ? 3.0 : 5.5
-  );
 
-  // H. "This is proudly presented to"
-  // Helvetica 11.5 pt, grey, baseline at 266 pt
-  const proudlyText = 'This is proudly presented to';
-  const proudlyWidth = helvetica.widthOfTextAtSize(proudlyText, 11.5);
-  page.drawText(proudlyText, {
-    x: (width - proudlyWidth) / 2,
-    y: fromTop(266),
+  const formattedScore = typeof score === 'number' ? score.toFixed(1) : String(score);
+
+  // =========================================================================
+  // VERSION BRANCH: v1_classic vs v2_premium
+  // =========================================================================
+  if (config.templateVersion === 'v1_classic') {
+    // --- V1 CLASSIC LAYOUT ---
+    const redColor = rgb(179 / 255, 18 / 255, 43 / 255);       // #B3122B
+    const creamColor = rgb(247 / 255, 243 / 255, 236 / 255);   // #F7F3EC
+    const textColor = rgb(26 / 255, 26 / 255, 26 / 255);       // #1A1A1A
+    const greyColor = rgb(85 / 255, 85 / 255, 85 / 255);       // #555555
+    const lineUnderline = rgb(207 / 255, 175 / 255, 168 / 255); // #CFAFA8
+    const blackColor = rgb(0, 0, 0);
+
+    // Cream Full-Page Background
+    page.drawRectangle({ x: 0, y: 0, width, height, color: creamColor });
+
+    // Red Frame: 4.5 pt, inset 21 pt
+    page.drawRectangle({
+      x: 21,
+      y: 21,
+      width: width - 42,
+      height: height - 42,
+      borderColor: redColor,
+      borderWidth: 4.5
+    });
+
+    // Thin Red Line: 1.1 pt, inset 30 pt
+    page.drawRectangle({
+      x: 30,
+      y: 30,
+      width: width - 60,
+      height: height - 60,
+      borderColor: redColor,
+      borderWidth: 1.1
+    });
+
+    // Hub Logo (94 x 94 pt, centred, top edge 48 pt from top)
+    const logoWidth = 94;
+    const logoHeight = 94;
+    const logoX = (width - logoWidth) / 2;
+    const logoY = fromTop(48 + logoHeight);
+    if (hubLogoImg) {
+      page.drawImage(hubLogoImg, { x: logoX, y: logoY, width: logoWidth, height: logoHeight });
+    }
+
+    drawCenteredTextWithSpacing('TECHNICAL SKILL DEVELOPMENT HUB  •  SVIT NASHIK', 158, helvetica, 9.5, greyColor, 2.2);
+    drawCenteredTextWithSpacing('CERTIFICATE', 208, timesBold, 44, redColor, 2.5);
+    drawCenteredTextWithSpacing(typeSubtitle, 232, helvetica, 12.5, textColor, typeSubtitle.length > 15 ? 3.0 : 5.5);
+
+    const proudlyText = 'This is proudly presented to';
+    const proudlyWidth = helvetica.widthOfTextAtSize(proudlyText, 11.5);
+    page.drawText(proudlyText, {
+      x: (width - proudlyWidth) / 2,
+      y: fromTop(266),
+      size: 11.5,
+      font: helvetica,
+      color: greyColor
+    });
+
+    let nameFontSize = 32;
+    while (timesItalic.widthOfTextAtSize(safeName, nameFontSize) > 460 && nameFontSize > 16) {
+      nameFontSize -= 0.5;
+    }
+    const nameWidth = timesItalic.widthOfTextAtSize(safeName, nameFontSize);
+    page.drawText(safeName, {
+      x: (width - nameWidth) / 2,
+      y: fromTop(308),
+      size: nameFontSize,
+      font: timesItalic,
+      color: textColor
+    });
+
+    page.drawLine({
+      start: { x: (width - 460) / 2, y: fromTop(316) },
+      end: { x: (width + 460) / 2, y: fromTop(316) },
+      thickness: 1,
+      color: lineUnderline
+    });
+
+    drawMixedCenteredLine([
+      { text: 'for successfully completing the ', font: helvetica, size: 12.5, color: textColor },
+      { text: eventName || 'Technova Code Sprint: 9 Days to Build', font: helveticaBold, size: 12.5, color: textColor },
+      { text: ',', font: helvetica, size: 12.5, color: textColor }
+    ], 342);
+
+    drawMixedCenteredLine([
+      { text: 'a daily coding challenge organised by the Technical Skill Development Hub, SVIT Nashik,', font: helvetica, size: 12.5, color: textColor }
+    ], 360);
+
+    const line3SegmentsClassic = [
+      { text: 'from  ', font: helvetica, size: 12.5, color: textColor },
+      { text: '14 Oct 2026', font: helveticaBold, size: 12, color: redColor },
+      { text: '  to  ', font: helvetica, size: 12.5, color: textColor },
+      { text: '22 Oct 2026', font: helveticaBold, size: 12, color: redColor },
+      { text: ' , in the ', font: helvetica, size: 12.5, color: textColor },
+      { text: `[${language}]`, font: helveticaBold, size: 12, color: redColor },
+      { text: ' track, with a score of ', font: helvetica, size: 12.5, color: textColor },
+      { text: `[${formattedScore}]`, font: helveticaBold, size: 12, color: redColor },
+      { text: ' / 100', font: helvetica, size: 12.5, color: textColor }
+    ];
+    if (rank) {
+      line3SegmentsClassic.push({ text: ' (', font: helvetica, size: 12.5, color: textColor });
+      line3SegmentsClassic.push({ text: `Rank #${rank}`, font: helveticaBold, size: 12, color: redColor });
+      line3SegmentsClassic.push({ text: ').', font: helvetica, size: 12.5, color: textColor });
+    } else {
+      line3SegmentsClassic.push({ text: '.', font: helvetica, size: 12.5, color: textColor });
+    }
+    drawMixedCenteredLine(line3SegmentsClassic, 378);
+
+    drawCenteredTextWithSpacing('Learn   |   Build   |   Grow', 412, timesItalic, 12.5, redColor, 2);
+
+    const sigLineY = fromTop(503);
+    const leftCenterX = 170;
+    const rightCenterX = 672;
+    const sigLineWidth = 210;
+
+    page.drawLine({
+      start: { x: leftCenterX - sigLineWidth / 2, y: sigLineY },
+      end: { x: leftCenterX + sigLineWidth / 2, y: sigLineY },
+      thickness: 1,
+      color: blackColor
+    });
+    if (secSigImg) {
+      const secSigW = 130;
+      const secSigH = (secSigW * 115) / 479;
+      page.drawImage(secSigImg, { x: leftCenterX - secSigW / 2, y: sigLineY + 3, width: secSigW, height: secSigH });
+    }
+    const secName = config.secName || 'Vedant Kokane';
+    const secNameW = helveticaBold.widthOfTextAtSize(secName, 11.5);
+    page.drawText(secName, { x: leftCenterX - secNameW / 2, y: fromTop(518), size: 11.5, font: helveticaBold, color: textColor });
+    const secTitle = config.secTitle || 'Technical Secretary, SVIT Nashik';
+    const secTitleW = helvetica.widthOfTextAtSize(secTitle, 9.5);
+    page.drawText(secTitle, { x: leftCenterX - secTitleW / 2, y: fromTop(530), size: 9.5, font: helvetica, color: greyColor });
+
+    page.drawLine({
+      start: { x: rightCenterX - sigLineWidth / 2, y: sigLineY },
+      end: { x: rightCenterX + sigLineWidth / 2, y: sigLineY },
+      thickness: 1,
+      color: blackColor
+    });
+    if (princSigImg) {
+      const princSigW = 110;
+      const princSigH = (princSigW * 108) / 297;
+      page.drawImage(princSigImg, { x: rightCenterX - princSigW / 2, y: sigLineY + 3, width: princSigW, height: princSigH });
+    }
+    const princName = config.princName || 'Dr. Sarang S. Pande';
+    const princNameW = helveticaBold.widthOfTextAtSize(princName, 11.5);
+    page.drawText(princName, { x: rightCenterX - princNameW / 2, y: fromTop(518), size: 11.5, font: helveticaBold, color: textColor });
+    const princTitle = config.princTitle || 'Principal, SVIT Nashik';
+    const princTitleW = helvetica.widthOfTextAtSize(princTitle, 9.5);
+    page.drawText(princTitle, { x: rightCenterX - princTitleW / 2, y: fromTop(530), size: 9.5, font: helvetica, color: greyColor });
+
+    if (sealImg) {
+      page.drawImage(sealImg, { x: (width - 82) / 2, y: sigLineY - 8, width: 82, height: 82 });
+    }
+    const certIdText = `Certificate ID:   ${certificateId}   •   Issue Date:   ${issueDate}`;
+    const certIdW = helvetica.widthOfTextAtSize(certIdText, 8.5);
+    page.drawText(certIdText, { x: (width - certIdW) / 2, y: fromTop(530), size: 8.5, font: helvetica, color: greyColor });
+
+    page.drawRectangle({
+      x: 718,
+      y: fromTop(129),
+      width: 78,
+      height: 78,
+      color: rgb(1, 1, 1),
+      borderColor: rgb(220 / 255, 200 / 255, 200 / 255),
+      borderWidth: 0.5
+    });
+    page.drawImage(qrImg, { x: 722, y: fromTop(125), width: 70, height: 70 });
+    const scanW = helveticaBold.widthOfTextAtSize('SCAN TO VERIFY', 7.5);
+    page.drawText('SCAN TO VERIFY', { x: 722 + (70 - scanW) / 2, y: fromTop(141), size: 7.5, font: helveticaBold, color: greyColor });
+
+    return await pdfDoc.save();
+  }
+
+  // =========================================================================
+  // V2 PREMIUM LAYOUT (Exact reproduction of Technova_Certificate_Template_Premium.pdf)
+  // =========================================================================
+  const redColor = rgb(179 / 255, 18 / 255, 43 / 255);       // #B3122B
+  const darkRedColor = rgb(142 / 255, 14 / 255, 34 / 255);   // #8E0E22
+  const goldColor = rgb(201 / 255, 162 / 255, 75 / 255);     // #C9A24B
+  const creamColor = rgb(251 / 255, 247 / 255, 239 / 255);   // #FBF7EF
+  const textColor = rgb(26 / 255, 26 / 255, 26 / 255);       // #1A1A1A
+  const greyColor = rgb(90 / 255, 90 / 255, 90 / 255);       // #5A5A5A
+  const whiteColor = rgb(1, 1, 1);
+  const blackColor = rgb(0, 0, 0);
+
+  // A. Background: full-page cream #FBF7EF
+  page.drawRectangle({ x: 0, y: 0, width, height, color: creamColor });
+
+  // B. Borders:
+  // 1. 7 pt red frame inset 16 pt from the edge
+  page.drawRectangle({
+    x: 16,
+    y: 16,
+    width: width - 32,
+    height: height - 32,
+    borderColor: redColor,
+    borderWidth: 7
+  });
+
+  // 2. 2 pt gold frame inset 25 pt
+  page.drawRectangle({
+    x: 25,
+    y: 25,
+    width: width - 50,
+    height: height - 50,
+    borderColor: goldColor,
+    borderWidth: 2
+  });
+
+  // 3. 0.9 pt red line inset 31 pt
+  page.drawRectangle({
+    x: 31,
+    y: 31,
+    width: width - 62,
+    height: height - 62,
+    borderColor: redColor,
+    borderWidth: 0.9
+  });
+
+  // C. Corner ornaments:
+  // At each corner, centred 44 pt in from both edges, three concentric quarter-circle gold arcs
+  // (radius 13, 21 and 29 pt, 1.3 pt stroke) curving into the page, plus a gold dot (radius 3.2 pt) at center point.
+  function drawQuarterArc(cx, cy, r, startAngle, endAngle) {
+    const steps = 24;
+    const dTheta = (endAngle - startAngle) / steps;
+    let prevX = cx + r * Math.cos(startAngle);
+    let prevY = cy + r * Math.sin(startAngle);
+    for (let i = 1; i <= steps; i++) {
+      const theta = startAngle + i * dTheta;
+      const x = cx + r * Math.cos(theta);
+      const y = cy + r * Math.sin(theta);
+      page.drawLine({
+        start: { x: prevX, y: prevY },
+        end: { x, y },
+        thickness: 1.3,
+        color: goldColor
+      });
+      prevX = x;
+      prevY = y;
+    }
+  }
+
+  const corners = [
+    { cx: 44, cy: height - 44, start: -Math.PI / 2, end: 0 },
+    { cx: width - 44, cy: height - 44, start: Math.PI, end: 1.5 * Math.PI },
+    { cx: 44, cy: 44, start: 0, end: Math.PI / 2 },
+    { cx: width - 44, cy: 44, start: Math.PI / 2, end: Math.PI }
+  ];
+
+  corners.forEach(c => {
+    page.drawCircle({ x: c.cx, y: c.cy, size: 3.2, color: goldColor });
+    [13, 21, 29].forEach(r => drawQuarterArc(c.cx, c.cy, r, c.start, c.end));
+  });
+
+  // D. Hub logo:
+  // 80 pt diameter, centred at 421 pt across and 86 pt down, on a white circle with a gold 2.2 pt ring (radius 44 pt).
+  page.drawCircle({
+    x: 421,
+    y: fromTop(86),
+    size: 44,
+    color: whiteColor,
+    borderColor: goldColor,
+    borderWidth: 2.2
+  });
+  if (hubLogoImg) {
+    page.drawImage(hubLogoImg, {
+      x: 381,
+      y: fromTop(86) - 40,
+      width: 80,
+      height: 80
+    });
+  }
+
+  // E. Header under Hub logo:
+  // "TECHNICAL SKILL DEVELOPMENT HUB": Helvetica Bold 11, dark red, letter-spacing 3, baseline 146.
+  drawCenteredTextWithSpacing('TECHNICAL SKILL DEVELOPMENT HUB', 146, helveticaBold, 11, darkRedColor, 3);
+
+  // Under it, "Sir Visvesvaraya Institute of Technology, Nashik": Helvetica 8.5, grey, letter-spacing 0.6, baseline 159.
+  drawCenteredTextWithSpacing('Sir Visvesvaraya Institute of Technology, Nashik', 159, helvetica, 8.5, greyColor, 0.6);
+
+  // F. Left emblem:
+  // Red circle (radius 36) centred at 122 pt across and 92 pt down, with a gold 2.2 pt ring and a thin white inner ring (radius 30).
+  const leftCy = fromTop(92);
+  page.drawCircle({
+    x: 122,
+    y: leftCy,
+    size: 36,
+    color: redColor,
+    borderColor: goldColor,
+    borderWidth: 2.2
+  });
+  page.drawCircle({
+    x: 122,
+    y: leftCy,
+    size: 30,
+    borderColor: whiteColor,
+    borderWidth: 1
+  });
+  // A white "9" in Times Bold 38 and the word "DAYS" in Helvetica Bold 8.5 below it.
+  const nineW = timesBold.widthOfTextAtSize('9', 38);
+  page.drawText('9', {
+    x: 122 - nineW / 2,
+    y: leftCy - 6,
+    size: 38,
+    font: timesBold,
+    color: whiteColor
+  });
+  const daysW = helveticaBold.widthOfTextAtSize('DAYS', 8.5);
+  page.drawText('DAYS', {
+    x: 122 - daysW / 2,
+    y: leftCy - 20,
+    size: 8.5,
+    font: helveticaBold,
+    color: whiteColor
+  });
+
+  // G. Verification QR:
+  // 70 x 70 pt, centred at 720 pt across and 92 pt down (so its left edge is 685 pt and its top edge 57 pt),
+  // white background with a quiet zone. "SCAN TO VERIFY" in Helvetica Bold 7.2, grey, centred 10 pt under it.
+  page.drawRectangle({
+    x: 683,
+    y: fromTop(57 + 70 + 2),
+    width: 74,
+    height: 74,
+    color: whiteColor
+  });
+  page.drawImage(qrImg, {
+    x: 685,
+    y: fromTop(57 + 70),
+    width: 70,
+    height: 70
+  });
+  const scanW = helveticaBold.widthOfTextAtSize('SCAN TO VERIFY', 7.2);
+  page.drawText('SCAN TO VERIFY', {
+    x: 720 - scanW / 2,
+    y: fromTop(137),
+    size: 7.2,
+    font: helveticaBold,
+    color: greyColor
+  });
+
+  // H. "CERTIFICATE":
+  // Times Bold 50, red, letter-spacing 4, baseline 206.
+  drawCenteredTextWithSpacing('CERTIFICATE', 206, timesBold, 50, redColor, 4);
+
+  // I. Gold divider at 218 pt:
+  // 1.4 pt line from 150 pt left of centre to 14 pt left of centre,
+  // a gold diamond (14 pt wide, 12 pt tall) at the centre, and the same line on the right side.
+  const divY = fromTop(218);
+  page.drawLine({
+    start: { x: 421 - 150, y: divY },
+    end: { x: 421 - 14, y: divY },
+    thickness: 1.4,
+    color: goldColor
+  });
+  page.drawLine({
+    start: { x: 421 + 14, y: divY },
+    end: { x: 421 + 150, y: divY },
+    thickness: 1.4,
+    color: goldColor
+  });
+  page.drawSvgPath('M 0 -6 L 7 0 L 0 6 L -7 0 Z', {
+    x: 421,
+    y: divY,
+    color: goldColor
+  });
+
+  // J. Subtitle: "OF COMPLETION" (or "OF MERIT" / "OF EXCELLENCE & MERIT"):
+  // Helvetica Bold 12.5, letter-spacing 6, baseline 238.
+  drawCenteredTextWithSpacing(typeSubtitle, 238, helveticaBold, 12.5, textColor, typeSubtitle.length > 15 ? 3.5 : 6);
+
+  // "This is proudly presented to": Helvetica 11.5, grey, baseline 263.
+  const proudlyW = helvetica.widthOfTextAtSize('This is proudly presented to', 11.5);
+  page.drawText('This is proudly presented to', {
+    x: (width - proudlyW) / 2,
+    y: fromTop(263),
     size: 11.5,
     font: helvetica,
     color: greyColor
   });
 
-  // I. Student Name: Times Italic 32 pt (shrink down to min 16 pt), #1A1A1A, centred, in box 500 pt wide
-  // with a 1 pt line (#CFAFA8), 460 pt wide, under it at about 316 pt
-  let nameFontSize = 32;
-  while (timesItalic.widthOfTextAtSize(safeName, nameFontSize) > 460 && nameFontSize > 16) {
-    nameFontSize -= 0.5;
+  // K. Student name:
+  // Times Italic 34, #1A1A1A, centred, with a 1.2 pt gold line 480 pt wide under it at 315 pt.
+  // If the name is too long, shrink the font down to a minimum of 22 pt so it stays on one line.
+  let nameSize = 34;
+  while (timesItalic.widthOfTextAtSize(safeName, nameSize) > 480 && nameSize > 22) {
+    nameSize -= 0.5;
   }
-  const nameWidth = timesItalic.widthOfTextAtSize(safeName, nameFontSize);
+  const nameW = timesItalic.widthOfTextAtSize(safeName, nameSize);
   page.drawText(safeName, {
-    x: (width - nameWidth) / 2,
-    y: fromTop(308),
-    size: nameFontSize,
+    x: (width - nameW) / 2,
+    y: fromTop(307),
+    size: nameSize,
     font: timesItalic,
     color: textColor
   });
-
-  // 1 pt Underline at 316 pt
-  const underlineWidth = 460;
   page.drawLine({
-    start: { x: (width - underlineWidth) / 2, y: fromTop(316) },
-    end: { x: (width + underlineWidth) / 2, y: fromTop(316) },
-    thickness: 1,
-    color: lineUnderline
+    start: { x: (width - 480) / 2, y: fromTop(315) },
+    end: { x: (width + 480) / 2, y: fromTop(315) },
+    thickness: 1.2,
+    color: goldColor
   });
 
-  // J. Three Text Lines (baselines at 342, 360, 378 pt)
+  // L. Three body lines in Helvetica 12.5:
+  // Baselines at 342, 359 and 376 pt.
   // Line 1: "for successfully completing the Technova Code Sprint: 9 Days to Build,"
   drawMixedCenteredLine([
     { text: 'for successfully completing the ', font: helvetica, size: 12.5, color: textColor },
@@ -351,10 +642,9 @@ export async function generateCertificatePdf({
   // Line 2: "a daily coding challenge organised by the Technical Skill Development Hub, SVIT Nashik,"
   drawMixedCenteredLine([
     { text: 'a daily coding challenge organised by the Technical Skill Development Hub, SVIT Nashik,', font: helvetica, size: 12.5, color: textColor }
-  ], 360);
+  ], 359);
 
   // Line 3: "from 14 Oct 2026 to 22 Oct 2026 , in the [Language] track, with a score of [Score] / 100" (+ Rank if available)
-  const formattedScore = typeof score === 'number' ? score.toFixed(1) : String(score);
   const line3Segments = [
     { text: 'from  ', font: helvetica, size: 12.5, color: textColor },
     { text: '14 Oct 2026', font: helveticaBold, size: 12, color: redColor },
@@ -373,162 +663,114 @@ export async function generateCertificatePdf({
   } else {
     line3Segments.push({ text: '.', font: helvetica, size: 12.5, color: textColor });
   }
-  drawMixedCenteredLine(line3Segments, 378);
+  drawMixedCenteredLine(line3Segments, 376);
 
-  // K. "Learn | Build | Grow": Times Italic 12.5 pt, red, letter-spacing 2, baseline at 412 pt
-  drawCenteredTextWithSpacing(
-    'Learn   |   Build   |   Grow',
-    412,
-    timesItalic,
-    12.5,
-    redColor,
-    2
-  );
+  // M. "Learn | Build | Grow":
+  // Times Italic 13, dark red, letter-spacing 2.5, baseline 404.
+  drawCenteredTextWithSpacing('Learn   |   Build   |   Grow', 404, timesItalic, 13, darkRedColor, 2.5);
 
-  // Common Signature Baseline at 503 pt
-  const sigLineY = fromTop(503);
+  // N. Bottom signatures:
+  // Baseline at 498 pt. Line width 200 pt.
+  const sigY = fromTop(498);
+  const leftCenterX = 165;
+  const rightCenterX = 677;
 
-  // L. Left Signature Block (Technical Secretary, centred at x = 170 pt)
-  const leftCenterX = 170;
-  const sigLineWidth = 210;
   page.drawLine({
-    start: { x: leftCenterX - sigLineWidth / 2, y: sigLineY },
-    end: { x: leftCenterX + sigLineWidth / 2, y: sigLineY },
+    start: { x: leftCenterX - 100, y: sigY },
+    end: { x: leftCenterX + 100, y: sigY },
+    thickness: 1,
+    color: blackColor
+  });
+  page.drawLine({
+    start: { x: rightCenterX - 100, y: sigY },
+    end: { x: rightCenterX + 100, y: sigY },
     thickness: 1,
     color: blackColor
   });
 
+  // Left: Technical Secretary
   if (secSigImg) {
     const secSigW = 130;
     const secSigH = (secSigW * 115) / 479;
     page.drawImage(secSigImg, {
       x: leftCenterX - secSigW / 2,
-      y: sigLineY + 3,
+      y: sigY + 5,
       width: secSigW,
       height: secSigH
     });
   }
-
   const secName = config.secName || 'Vedant Kokane';
   const secNameW = helveticaBold.widthOfTextAtSize(secName, 11.5);
   page.drawText(secName, {
     x: leftCenterX - secNameW / 2,
-    y: fromTop(518),
+    y: fromTop(516),
     size: 11.5,
     font: helveticaBold,
     color: textColor
   });
-
   const secTitle = config.secTitle || 'Technical Secretary, SVIT Nashik';
-  const secTitleW = helvetica.widthOfTextAtSize(secTitle, 9.5);
+  const secTitleW = helvetica.widthOfTextAtSize(secTitle, 9);
   page.drawText(secTitle, {
     x: leftCenterX - secTitleW / 2,
-    y: fromTop(530),
-    size: 9.5,
+    y: fromTop(529),
+    size: 9,
     font: helvetica,
     color: greyColor
   });
 
-  // M. Right Signature Block (Principal, centred at x = 672 pt)
-  const rightCenterX = 672;
-  page.drawLine({
-    start: { x: rightCenterX - sigLineWidth / 2, y: sigLineY },
-    end: { x: rightCenterX + sigLineWidth / 2, y: sigLineY },
-    thickness: 1,
-    color: blackColor
-  });
-
+  // Right: Principal
   if (princSigImg) {
-    const princSigW = 110;
+    const princSigW = 108;
     const princSigH = (princSigW * 108) / 297;
     page.drawImage(princSigImg, {
       x: rightCenterX - princSigW / 2,
-      y: sigLineY + 3,
+      y: sigY + 5,
       width: princSigW,
       height: princSigH
     });
   }
-
   const princName = config.princName || 'Dr. Sarang S. Pande';
   const princNameW = helveticaBold.widthOfTextAtSize(princName, 11.5);
   page.drawText(princName, {
     x: rightCenterX - princNameW / 2,
-    y: fromTop(518),
+    y: fromTop(516),
     size: 11.5,
     font: helveticaBold,
     color: textColor
   });
-
   const princTitle = config.princTitle || 'Principal, SVIT Nashik';
-  const princTitleW = helvetica.widthOfTextAtSize(princTitle, 9.5);
+  const princTitleW = helvetica.widthOfTextAtSize(princTitle, 9);
   page.drawText(princTitle, {
     x: rightCenterX - princTitleW / 2,
-    y: fromTop(530),
-    size: 9.5,
+    y: fromTop(529),
+    size: 9,
     font: helvetica,
     color: greyColor
   });
 
-  // N. College Seal: 82 x 82 pt, centred on page, bottom about 8 pt below signature line level
-  const sealW = 82;
-  const sealH = 82;
-  const sealX = (width - sealW) / 2;
-  const sealY = sigLineY - 8;
+  // O. Bottom centre emblem:
+  // College seal, 84 pt diameter, centred at 421 pt across, bottom of the seal 18 pt below the signature line level
+  // (so its top is 416 pt down and bottom 500 pt down).
   if (sealImg) {
     page.drawImage(sealImg, {
-      x: sealX,
-      y: sealY,
-      width: sealW,
-      height: sealH
+      x: 421 - 42,
+      y: fromTop(500),
+      width: 84,
+      height: 84
     });
   }
 
-  // Certificate ID and issue date under seal
-  const certIdText = `Certificate ID:   ${certificateId}   •   Issue Date:   ${issueDate}`;
+  // Under it, "Certificate ID: [ID]" in Helvetica 8.5 grey, centred, baseline 516. No second red box or date duplicate under the seal.
+  const certIdText = `Certificate ID: ${certificateId}`;
   const certIdW = helvetica.widthOfTextAtSize(certIdText, 8.5);
   page.drawText(certIdText, {
     x: (width - certIdW) / 2,
-    y: fromTop(530),
+    y: fromTop(516),
     size: 8.5,
     font: helvetica,
     color: greyColor
   });
 
-  // O. Verification QR: 70 x 70 pt, top-right corner.
-  // left edge at 722 pt, top edge at 55 pt from top. White quiet zone background
-  const qrLeft = 722;
-  const qrTop = 55;
-  const qrSize = 70;
-
-  page.drawRectangle({
-    x: qrLeft - 4,
-    y: fromTop(qrTop + qrSize + 4),
-    width: qrSize + 8,
-    height: qrSize + 8,
-    color: rgb(1, 1, 1),
-    borderColor: rgb(220 / 255, 200 / 255, 200 / 255),
-    borderWidth: 0.5
-  });
-
-  page.drawImage(qrImg, {
-    x: qrLeft,
-    y: fromTop(qrTop + qrSize),
-    width: qrSize,
-    height: qrSize
-  });
-
-  // Under QR: "SCAN TO VERIFY" in Helvetica Bold 7.5 pt, grey, centred
-  const scanText = 'SCAN TO VERIFY';
-  const scanW = helveticaBold.widthOfTextAtSize(scanText, 7.5);
-  page.drawText(scanText, {
-    x: qrLeft + (qrSize - scanW) / 2,
-    y: fromTop(qrTop + qrSize + 16),
-    size: 7.5,
-    font: helveticaBold,
-    color: greyColor
-  });
-
-  // Flat PDF (no interactive form fields)
   return await pdfDoc.save();
 }
 
@@ -544,7 +786,7 @@ export async function downloadCertificatePdf(params) {
   const sanitizedName = (params.studentName || 'Student').replace(/[^a-zA-Z0-9_\-]/g, '_');
   const certId = (params.certificateId || 'CERT').replace(/[^a-zA-Z0-9_\-]/g, '_');
   link.href = url;
-  link.download = `${sanitizedName}_${certId}.pdf`;
+  link.download = `Technova_Code_Sprint_Certificate_${sanitizedName}.pdf`;
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
@@ -567,11 +809,10 @@ export async function generateCertificatesZip(certificatesList = [], templateCon
         type: cert.type || 'Participation',
         certificateId: cert.certificateId,
         issueDate: cert.issueDate || cert.issuedDate || '23 Oct 2026',
-        templateConfig
+        templateConfig: { ...templateConfig, templateVersion: cert.templateVersion || templateConfig?.templateVersion }
       });
       const sanitizedName = (cert.studentName || 'Student').replace(/[^a-zA-Z0-9_\-]/g, '_');
-      const certId = (cert.certificateId || 'CERT').replace(/[^a-zA-Z0-9_\-]/g, '_');
-      const filename = `${sanitizedName}_${certId}.pdf`;
+      const filename = `Technova_Code_Sprint_Certificate_${sanitizedName}.pdf`;
       zip.file(filename, pdfBytes);
     } catch (e) {
       console.warn(`Failed to package certificate for ${cert.studentName}:`, e);
@@ -594,4 +835,3 @@ export async function downloadCertificatesZip(certificatesList = [], templateCon
   document.body.removeChild(link);
   setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
-

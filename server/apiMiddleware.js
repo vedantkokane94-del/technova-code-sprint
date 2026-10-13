@@ -794,7 +794,10 @@ export function createApiMiddleware() {
       if (url === '/api/admin/login' && req.method === 'POST') {
         const remainingSec = checkIpRateLimit(clientIp, store);
         if (remainingSec > 0) {
-          return sendJson(429, { error: `Security lockout in effect. Please wait ${remainingSec}s before retrying.` });
+          return sendJson(429, { 
+            error: "Too many attempts. Try again in 15 minutes.",
+            lockoutSeconds: remainingSec 
+          });
         }
 
         if (!isIpAllowed(clientIp)) {
@@ -812,7 +815,9 @@ export function createApiMiddleware() {
         }
 
         const configuredAdminEmail = (process.env.ADMIN_EMAIL || 'technicalteamsvit@gmail.com').trim().toLowerCase();
+        const configuredAdminName = (process.env.ADMIN_NAME || 'Vedant Kokane').trim().toLowerCase();
         const inputEmail = body.email ? String(body.email).trim().toLowerCase() : '';
+        const inputName = body.name ? String(body.name).trim().toLowerCase() : '';
         const inputPassword = body.password ? String(body.password) : '';
         const matched = getMatchingTrustedDevice(req, cookies, body, store);
 
@@ -831,12 +836,13 @@ export function createApiMiddleware() {
           return sendJson(404, { error: "Not found" });
         }
 
-        // Email verification (if email was supplied, must match configuredAdminEmail)
+        // Email, Name & Password verification
         const isEmailValid = body.email ? (inputEmail === configuredAdminEmail) : true;
+        const isNameValid = body.name ? (inputName === configuredAdminName) : true;
         const isPasswordValid = verifyAdminPassword(inputPassword);
 
-        if (!isEmailValid || !isPasswordValid) {
-          console.error(`[AdminAuth] Failed admin login attempt from ${clientIp}: emailValid=${isEmailValid}, passValid=${isPasswordValid}`);
+        if (!isEmailValid || !isNameValid || !isPasswordValid) {
+          console.error(`[AdminAuth] Failed admin login attempt from ${clientIp}: emailValid=${isEmailValid}, nameValid=${isNameValid}, passValid=${isPasswordValid}`);
           recordIpRateLimitFailure(clientIp, store, Date.now());
           const ipRecord = store.adminIpRateLimits?.[clientIp] || {};
           const attemptsRemaining = Math.max(0, 5 - (ipRecord.failedAttempts || 0));
@@ -849,17 +855,17 @@ export function createApiMiddleware() {
             action: 'admin_login_attempt',
             attemptedEmail: inputEmail ? `${inputEmail.slice(0, 3)}***` : 'unspecified',
             success: false,
-            reason: !isEmailValid ? 'invalid_email' : 'invalid_password'
+            reason: 'admin_access_denied'
           });
           saveStore(store);
 
           return sendJson(401, {
-            error: "Authentication failed. Invalid administrator credentials.",
+            error: "Authentication failed. Admin access denied.",
             attemptsRemaining
           });
         }
 
-        // Successful authentication: issue rotated 2-hour JWT session
+        // Successful authentication: issue rotated 60-minute JWT session (Section 3)
         resetIpRateLimit(clientIp, store);
         const sessionId = crypto.randomBytes(24).toString('hex');
         const sessionJwt = createAdminSessionJwt(sessionId, configuredAdminEmail, matched?.tokenHash || null);
@@ -872,7 +878,7 @@ export function createApiMiddleware() {
           email: configuredAdminEmail,
           deviceTokenHash: matched?.tokenHash || null,
           createdAt: Date.now(),
-          expiresAt: Date.now() + (2 * 3600 * 1000) // 2-hour short-lived session
+          expiresAt: Date.now() + (3600 * 1000) // 60-minute session
         });
 
         store.adminLoginLogs = store.adminLoginLogs || [];
@@ -889,8 +895,8 @@ export function createApiMiddleware() {
         saveStore(store);
 
         const secureSuffix = isSecureConnection(req) ? '; Secure' : '';
-        const sessionCookie = `admin_session=${sessionJwt}; Path=/; HttpOnly; SameSite=Lax; Max-Age=7200${secureSuffix}`;
-        const csrfCookie = `admin_csrf=${csrfToken}; Path=/; SameSite=Lax; Max-Age=7200${secureSuffix}`;
+        const sessionCookie = `admin_session=${sessionJwt}; Path=/; HttpOnly; SameSite=Lax; Max-Age=3600${secureSuffix}`;
+        const csrfCookie = `admin_csrf=${csrfToken}; Path=/; SameSite=Lax; Max-Age=3600${secureSuffix}`;
 
         return sendJson(200, {
           success: true,

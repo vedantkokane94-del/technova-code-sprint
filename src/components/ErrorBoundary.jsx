@@ -260,7 +260,7 @@ export class PageErrorBoundary extends React.Component {
                 className="px-5 py-2.5 rounded-xl border border-[#E8DEC8] dark:border-[#2E3440] bg-[#FCF9F2] dark:bg-[#111317] hover:border-[#B3122B] text-gray-700 dark:text-gray-200 text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
               >
                 <Home className="w-3.5 h-3.5" />
-                <span>Back to dashboard</span>
+                <span>{this.props.pageName === 'admin' ? 'Back to home' : 'Back to dashboard'}</span>
               </button>
             </div>
 

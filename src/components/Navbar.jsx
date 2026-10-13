@@ -10,7 +10,8 @@ import {
   LayoutDashboard, 
   LogOut,
   Award,
-  Home
+  Home,
+  Lock
 } from 'lucide-react';
 import { SVITHubLogo } from './BrandLogo';
 import { safeInitials, safeSplit, safeTrim } from '../utils/safeString';
@@ -33,6 +34,11 @@ export const Navbar = ({ currentTab, setCurrentTab }) => {
   const handleNavClick = (id) => {
     setCurrentTab(id);
     setMobileMenuOpen(false);
+    if (id === 'admin') {
+      window.history.pushState(null, '', '/admin');
+    } else if (id === 'landing') {
+      window.history.pushState(null, '', '/');
+    }
   };
 
   const getInitials = (name) => {
@@ -114,9 +120,9 @@ export const Navbar = ({ currentTab, setCurrentTab }) => {
             {user ? (
               <div className="flex items-center gap-1.5">
                 <div 
-                  onClick={() => handleNavClick('register')}
+                  onClick={() => handleNavClick(isAdmin ? 'admin' : 'register')}
                   className="flex items-center gap-2 h-10 px-2.5 rounded-xl bg-[#F5EFEB] dark:bg-[#1E232B] border border-[#E8DEC8] dark:border-[#2E3440] cursor-pointer hover:border-[#B3122B] transition-all min-w-0"
-                  title="Click to view or edit profile"
+                  title={isAdmin ? "Click to open admin dashboard" : "Click to view or edit profile"}
                 >
                   {/* Initials circle: red on cream */}
                   <div className="w-6 h-6 rounded-full bg-[#FCF9F2] text-[#B3122B] border border-[#B3122B]/50 font-black text-[10px] flex items-center justify-center shrink-0 shadow-2xs">
@@ -192,18 +198,32 @@ export const Navbar = ({ currentTab, setCurrentTab }) => {
             );
           })}
 
-          {isAdmin && (
-            <div className="pt-2 border-t border-[#E8DEC8] dark:border-[#2E3440] flex justify-between items-center text-xs">
-              <span className="text-gray-500 font-medium">Faculty / Mentor:</span>
+          {/* Persistent Admin entry point visible to everyone (at least 44px tall) */}
+          <div className="pt-2 border-t border-[#E8DEC8] dark:border-[#2E3440]">
+            {isAdmin ? (
+              <div className="flex justify-between items-center text-xs">
+                <span className="text-gray-500 font-medium">Faculty Admin:</span>
+                <button
+                  onClick={() => handleNavClick('admin')}
+                  className="min-h-[44px] px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer bg-[#B3122B] text-white"
+                >
+                  <ShieldCheck className="w-4 h-4" />
+                  <span>Admin Dashboard</span>
+                </button>
+              </div>
+            ) : (
               <button
                 onClick={() => handleNavClick('admin')}
-                className="px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1 cursor-pointer bg-[#B3122B] text-white"
+                className="w-full min-h-[44px] flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-semibold text-gray-500 dark:text-gray-400 hover:text-[#B3122B] dark:hover:text-[#ff8a9e] hover:bg-[#F5EFEB] dark:hover:bg-[#1E232B] transition-all cursor-pointer"
               >
-                <ShieldCheck className="w-3.5 h-3.5" />
-                <span>Admin Dashboard</span>
+                <div className="flex items-center gap-2">
+                  <Lock className="w-3.5 h-3.5 text-gray-400" />
+                  <span>Admin Login</span>
+                </div>
+                <span className="text-[10px] text-gray-400">Faculty & Mentors</span>
               </button>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       )}
     </header>

@@ -12,6 +12,7 @@ import { MyCertificatePage } from './pages/MyCertificatePage';
 import { VerifyCertificatePage } from './pages/VerifyCertificatePage';
 import { ErrorBoundary, PageErrorBoundary } from './components/ErrorBoundary';
 import { SVITHubLogo, DurgaMataSketch, ShaktiVidyaWatermark } from './components/BrandLogo';
+import { ShieldCheck } from 'lucide-react';
 
 function SprintApp() {
   const [currentTab, setCurrentTab] = useState('landing');
@@ -21,34 +22,18 @@ function SprintApp() {
 
   const ADMIN_ROUTE_PATH = (import.meta.env.VITE_ADMIN_PATH || '/svit-lead-command-2026').replace(/\/$/, '');
 
-  // Listen for direct URL routes e.g. /admin/login, /admin, /verify/ID
+  // Listen for direct URL routes e.g. /admin, /verify/ID
   React.useEffect(() => {
     const checkRoute = () => {
       const pathname = window.location.pathname.replace(/\/$/, '');
       const hash = window.location.hash.replace(/\/$/, '');
       const searchParams = new URLSearchParams(window.location.search);
 
-      // 1. Explicit Admin Login Route: /admin/login
-      if (pathname === '/admin/login' || hash === '#admin/login') {
-        if (!isSessionLoading && isAdmin) {
-          setCurrentTab('admin');
+      // 1. Dedicated Admin Page Route: /admin or /admin/login
+      if (pathname === '/admin' || pathname === '/admin/login' || hash === '#admin' || hash === '#admin/login') {
+        setCurrentTab('admin');
+        if (pathname === '/admin/login' || hash === '#admin/login') {
           window.history.replaceState(null, '', '/admin');
-        } else {
-          setCurrentTab('admin-login');
-        }
-        return;
-      }
-
-      // 2. Protected Admin Dashboard Route: /admin
-      if (pathname === '/admin' || hash === '#admin') {
-        if (isSessionLoading) {
-          setCurrentTab('admin');
-        } else if (isAdmin) {
-          setCurrentTab('admin');
-        } else {
-          // Unauthenticated visitors to /admin are directed to /admin/login
-          setCurrentTab('admin-login');
-          window.history.replaceState(null, '', '/admin/login');
         }
         return;
       }
@@ -175,7 +160,14 @@ function SprintApp() {
         )}
 
         {currentTab === 'admin' && (
-          <PageErrorBoundary pageName="admin" onBackToDashboard={() => setCurrentTab('dashboard')}>
+          <PageErrorBoundary 
+            pageName="admin" 
+            friendlyMessage="We couldn't open the admin page. Please try again."
+            onBackToDashboard={() => {
+              setCurrentTab('landing');
+              window.history.pushState(null, '', '/');
+            }}
+          >
             {isSessionLoading ? (
               <div className="min-h-[50vh] flex flex-col items-center justify-center p-8 text-center">
                 <div className="w-12 h-12 rounded-full border-4 border-[#8B0D20]/20 border-t-[#8B0D20] animate-spin mb-4" />
@@ -214,7 +206,7 @@ function SprintApp() {
             </div>
           </div>
 
-          <div className="flex items-center gap-3 text-gray-500 text-xs">
+          <div className="flex flex-wrap items-center justify-center sm:justify-end gap-3 text-gray-500 text-xs">
             <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-800 dark:text-amber-300 font-semibold">
               <DurgaMataSketch className="w-5 h-5 text-[#B3122B]" />
               <span>Shri Durga Mata Blessings</span>
@@ -223,6 +215,20 @@ function SprintApp() {
             <span>Academic Integrity Protected</span>
             <span>•</span>
             <span>© 2026 SVIT Nashik</span>
+            <span>•</span>
+            {/* Low-key, always present and tappable (at least 44px tall) Admin Login entry point */}
+            <button
+              type="button"
+              onClick={() => {
+                setCurrentTab('admin');
+                window.history.pushState(null, '', '/admin');
+              }}
+              className="min-h-[44px] px-2.5 py-2 inline-flex items-center gap-1.5 text-xs text-gray-400 hover:text-[#B3122B] dark:hover:text-[#ff8a9e] transition-colors cursor-pointer rounded-lg"
+              title={isAdmin ? "Open Administrator Command Center" : "Institutional Administrator Sign-In"}
+            >
+              <ShieldCheck className="w-3.5 h-3.5" />
+              <span>{isAdmin ? "Admin Dashboard" : "Admin Login"}</span>
+            </button>
           </div>
         </div>
       </footer>
