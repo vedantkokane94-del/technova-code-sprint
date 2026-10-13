@@ -51,6 +51,7 @@ import {
 } from 'lucide-react';
 import { Github } from '../components/GithubIcon';
 import { CertificateView } from '../components/CertificateView';
+import { AdminRegistrationsPanel } from '../components/AdminRegistrationsPanel';
 import { SVITHubLogo, DurgaMataSketch } from '../components/BrandLogo';
 import { SPRINT_SCHEDULE, SPRINT_START_DATE, SPRINT_END_DATE, SPRINT_ISSUE_DATE, getSprintDaySchedule } from '../data/tasksSeed';
 import { downloadCertificatePdf, DEFAULT_TEMPLATE_CONFIG } from '../utils/certificateGenerator';
@@ -74,6 +75,8 @@ export const AdminPage = ({ setCurrentTab }) => {
     updateTasks, 
     submissions, 
     saveSubmissions, 
+    students,
+    refreshSharedState,
     toggleVivaStatus, 
     evaluateViva, 
     flagSubmission,
@@ -126,7 +129,7 @@ export const AdminPage = ({ setCurrentTab }) => {
     toggleAllowExitedForCert
   } = useApp();
 
-  const [activeTab, setActiveTab] = useState('submissions'); // 'submissions' | 'proctoring' | 'certificates' | 'verification' | 'tasks' | 'template' | 'testmode' | 'security' | 'examsettings'
+  const [activeTab, setActiveTab] = useState('registrations'); // 'registrations' | 'submissions' | 'proctoring' | 'certificates' | 'verification' | 'tasks' | 'template' | 'testmode' | 'security' | 'examsettings'
   const [filterDay, setFilterDay] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
   
@@ -1474,10 +1477,23 @@ export const AdminPage = ({ setCurrentTab }) => {
           </div>
         </div>
 
-        {/* View Switcher: Submissions vs Proctoring vs Certificates vs Verification vs Tasks vs Certificate Template vs Admin Test Mode */}
+        {/* View Switcher: Registrations vs Submissions vs Proctoring vs Certificates vs Verification vs Tasks vs Certificate Template vs Admin Test Mode */}
         <div className="flex items-center gap-2.5 border-b border-[#E8DEC8] dark:border-[#2E3440] pb-4 mb-6 overflow-x-auto">
           <button
+            onClick={() => setActiveTab('registrations')}
+            data-testid="admin-tab-registrations"
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1.5 cursor-pointer ${
+              activeTab === 'registrations'
+                ? 'bg-[#B3122B] text-white shadow-xs'
+                : 'text-gray-600 dark:text-gray-300 hover:bg-[#F5EFEB] dark:hover:bg-[#1E232B]'
+            }`}
+          >
+            <Users className="w-3.5 h-3.5" />
+            <span>Registrations & Verification ({students?.length || allStudents.length})</span>
+          </button>
+          <button
             onClick={() => setActiveTab('submissions')}
+            data-testid="admin-tab-submissions"
             className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
               activeTab === 'submissions'
                 ? 'bg-[#B3122B] text-white shadow-xs'
@@ -1574,6 +1590,19 @@ export const AdminPage = ({ setCurrentTab }) => {
             <span>Judging & Proctoring Criteria</span>
           </button>
         </div>
+
+        {/* REGISTRATIONS & VERIFICATION TAB */}
+        {activeTab === 'registrations' && (
+          <AdminRegistrationsPanel
+            onDataChanged={() => {
+              if (typeof refreshSharedState === 'function') refreshSharedState();
+            }}
+            showToast={(msg) => {
+              setAdminToast(msg);
+              setTimeout(() => setAdminToast(''), 4000);
+            }}
+          />
+        )}
 
         {/* SUBMISSIONS TAB */}
         {activeTab === 'submissions' && (

@@ -45,6 +45,10 @@ export const LeaderboardPage = () => {
     const key = normPrn || sub.userId;
     if (!key) return;
     const dbStudent = registeredProfileByKey[normPrn] || registeredProfileByKey[sub.userId] || null;
+    if (students && students.length > 0 && !dbStudent) return;
+    if (dbStudent && (dbStudent.accountStatus === 'unverified' || dbStudent.suspended || dbStudent.accountStatus === 'suspended')) {
+      return;
+    }
 
     if (!studentMap[key]) {
       studentMap[key] = {

@@ -715,6 +715,12 @@ export const AppProvider = ({ children }) => {
   // Server-Verified Administrator Session State
   const [isServerAdminAuthenticated, setIsServerAdminAuthenticated] = useState(false);
   const [isSessionLoading, setIsSessionLoading] = useState(true);
+  const [registrationSettings, setRegistrationSettings] = useState({
+    allowlistEnabled: false,
+    allowedDomains: ['svit.ac.in', 'pravara.in', 'sinhgad.edu'],
+    phoneVerificationRequired: false,
+    turnstileSiteKey: ''
+  });
   const isServerAdminRef = useRef(false);
 
   useEffect(() => {
@@ -738,6 +744,9 @@ export const AppProvider = ({ children }) => {
     if (Array.isArray(data.proctoringFlags)) setProctoringFlags(data.proctoringFlags);
     if (data.resultsPublished !== undefined) setResultsPublished(Boolean(data.resultsPublished));
     if (data.allowExitedStudentsForCert !== undefined) setAllowExitedStudentsForCert(Boolean(data.allowExitedStudentsForCert));
+    if (data.registrationSettings && typeof data.registrationSettings === 'object') {
+      setRegistrationSettings(prev => ({ ...prev, ...data.registrationSettings }));
+    }
 
     // Step 4: Load the user's name, roll number and track from the database using the session token
     if (!isServerAdminRef.current) {
@@ -875,6 +884,23 @@ export const AppProvider = ({ children }) => {
     }
     return res;
   };
+
+  const completeVerifiedSession = useCallback((res) => {
+    if (!res || !res.success) return;
+    if (res.sessionToken) {
+      setSessionToken(res.sessionToken);
+    }
+    localStorage.removeItem('technova_active_user');
+    if (res.user) {
+      setUserState(res.user);
+    }
+    if (Array.isArray(res.students)) {
+      setStudents(res.students);
+    }
+    if (Array.isArray(res.submissions)) {
+      setSubmissions(res.submissions);
+    }
+  }, [setSessionToken]);
 
   /**
    * Student Logout: clears session token from browser and server
@@ -1236,8 +1262,11 @@ export const AppProvider = ({ children }) => {
       setUser,
       sessionToken,
       loginStudent,
+      completeVerifiedSession,
       logoutStudent,
       refreshSharedState,
+      registrationSettings,
+      setRegistrationSettings,
       isAdmin,
       isSessionLoading,
       isVedantAdmin,

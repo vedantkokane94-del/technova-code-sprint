@@ -4,6 +4,22 @@ import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { computeUserSummary } from '../src/utils/scoring.js';
 import {
+  validateRegistrationPayload,
+  validateEmailAddress,
+  normalizeEmail,
+  validateIndianPhone,
+  normalizeIndianPhone
+} from '../src/utils/registrationValidation.js';
+import {
+  verifyEmailDomainMx,
+  generateSixDigitOtp,
+  hashOtp,
+  verifyOtpHash,
+  verifyCaptchaToken,
+  sendVerificationEmailOtp,
+  sendVerificationPhoneOtp
+} from './registrationValidator.js';
+import {
   readLocalStore,
   writeLocalStore,
   mergeStores,
@@ -61,6 +77,67 @@ export function saveStore(store) {
   pushToSupabaseIfConfigured(store).catch(() => {});
 }
 
+function getRegistrationSettings(store) {
+  const defaults = {
+    allowlistEnabled: process.env.ALLOWED_EMAIL_DOMAINS_ENABLED === 'true',
+    allowedDomains: (process.env.ALLOWED_EMAIL_DOMAINS || 'svit.ac.in,pravara.in,sinhgad.edu')
+      .split(',')
+      .map(d => d.trim().toLowerCase())
+      .filter(Boolean),
+    phoneVerificationRequired: process.env.PHONE_VERIFICATION_REQUIRED === 'true',
+    minSubmitTimeMs: 2500,
+    turnstileSiteKey: process.env.VITE_TURNSTILE_SITE_KEY || process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || ''
+  };
+  return {
+    ...defaults,
+    ...(store.registrationSettings || {}),
+    turnstileSiteKey: defaults.turnstileSiteKey
+  };
+}
+
+function checkScopedRateLimit(store, key, maxAttempts, windowMs) {
+  const now = Date.now();
+  store.registrationRateLimits = store.registrationRateLimits || {};
+  const entry = store.registrationRateLimits[key] || { timestamps: [] };
+  const recent = (entry.timestamps || []).filter(ts => now - ts < windowMs);
+  if (recent.length >= maxAttempts) {
+    const oldest = recent[0] || now;
+    const retryAfterSeconds = Math.max(1, Math.ceil((windowMs - (now - oldest)) / 1000));
+    store.registrationRateLimits[key] = { timestamps: recent };
+    return { allowed: false, retryAfterSeconds };
+  }
+  recent.push(now);
+  store.registrationRateLimits[key] = { timestamps: recent };
+  return { allowed: true, retryAfterSeconds: 0 };
+}
+
+function isStudentEligibleForActiveAccess(student) {
+  if (!student) return true;
+  if (student.suspended || student.accountStatus === 'suspended') return false;
+  if (student.accountStatus === 'unverified') return false;
+  return true;
+}
+
+function decorateStudentForClient(student) {
+  if (!student) return null;
+  const { sessionToken: _st, ...rest } = student;
+  const isLegacyUnverified =
+    student.accountStatus !== 'unverified' &&
+    student.accountStatus !== 'verified' &&
+    (!student.emailVerified || !student.phone);
+  return {
+    ...rest,
+    emailVerified: Boolean(student.emailVerified),
+    phoneVerified: Boolean(student.phoneVerified),
+    accountStatus: student.accountStatus || (student.emailVerified ? 'verified' : 'legacy_active'),
+    needsLegacyVerification: Boolean(student.needsLegacyVerification ?? isLegacyUnverified),
+    language: student.language || student.track || 'Python',
+    track: student.track || student.language || 'Python',
+    division: student.division || 'A',
+    role: 'student'
+  };
+}
+
 function getStudentTokenSecret() {
   return process.env.SESSION_SECRET || process.env.ADMIN_JWT_SECRET || 'svit-technova-student-session-secret-2026';
 }
@@ -71,10 +148,15 @@ function createStudentSessionToken(user) {
     prn: String(user.prn || '').trim().toUpperCase(),
     name: user.name,
     email: user.email,
+    phone: user.phone || '',
     year: user.year || 'First Year (FE)',
     branch: user.branch || 'Computer Engineering',
+    division: user.division || 'A',
     language: user.language || user.track || 'Python',
     track: user.track || user.language || 'Python',
+    emailVerified: Boolean(user.emailVerified),
+    phoneVerified: Boolean(user.phoneVerified),
+    accountStatus: user.accountStatus || 'verified',
     role: 'student',
     iat: Date.now()
   };
@@ -110,13 +192,22 @@ function computeSharedLeaderboard(store) {
     const key = normPrn || sub.userId;
     if (!key) continue;
     const profile = studentLookup.get(normPrn) || studentLookup.get(sub.userId) || null;
+    // Block unverified or suspended accounts from appearing on the leaderboard
+    if (profile && !isStudentEligibleForActiveAccess(profile)) {
+      continue;
+    }
     if (!studentMap[key]) {
       studentMap[key] = {
         userId: profile?.uid || sub.userId || `svit-stu-${normPrn}`,
         name: profile?.name || sub.studentName || 'Student',
         prn: normPrn || profile?.prn || sub.prn,
+        branch: profile?.branch || sub.branch || 'Computer Engineering',
+        year: profile?.year || sub.year || 'First Year (FE)',
+        division: profile?.division || sub.division || 'A',
         language: profile?.language || profile?.track || sub.language || sub.track || 'Python',
         track: profile?.track || profile?.language || sub.track || sub.language || 'Python',
+        emailVerified: Boolean(profile?.emailVerified),
+        accountStatus: profile?.accountStatus || 'legacy_active',
         submissions: []
       };
     } else if (profile) {
@@ -948,6 +1039,205 @@ export function createApiMiddleware() {
         return sendJson(200, { success: true });
       }
 
+      // 1.11 Admin Registrations Table & Summary Stats: GET /api/admin/registrations
+      if (url === '/api/admin/registrations' && req.method === 'GET') {
+        const buildRegistrationsPayload = () => {
+          const allStudents = store.students || [];
+          const allSubs = store.submissions || [];
+          const overrides = store.manualOverrides || {};
+
+          const registrations = allStudents.map(stu => {
+            const dec = decorateStudentForClient(stu);
+            const normPrn = String(stu.prn || '').trim().toUpperCase();
+            const stuSubs = allSubs.filter(
+              sub => String(sub.prn || '').trim().toUpperCase() === normPrn || sub.userId === stu.uid
+            );
+            const ov = overrides[stu.uid] ?? overrides[normPrn];
+            const summary = computeUserSummary(stuSubs, ov);
+            return {
+              ...dec,
+              phone: stu.phone || '',
+              normalizedEmail: stu.normalizedEmail || normalizeEmail(stu.email || '') || stu.email || '',
+              registeredAt: stu.registeredAt || stu.createdAt || stu.updatedAt || null,
+              verifiedAt: stu.verifiedAt || stu.emailVerifiedAt || null,
+              flagged: Boolean(stu.flagged),
+              flagReason: stu.flagReason || null,
+              suspended: Boolean(stu.suspended || stu.accountStatus === 'suspended'),
+              suspendedReason: stu.suspendedReason || null,
+              submissionCount: stuSubs.length,
+              totalScore: summary.totalScore
+            };
+          });
+
+          // Sort newest registrations first
+          registrations.sort((a, b) => {
+            const ta = a.registeredAt ? new Date(a.registeredAt).getTime() : 0;
+            const tb = b.registeredAt ? new Date(b.registeredAt).getTime() : 0;
+            return tb - ta;
+          });
+
+          const byBranch = {};
+          const byTrack = { C: 0, 'C++': 0, Java: 0, Python: 0 };
+          let verifiedCount = 0;
+          let unverifiedCount = 0;
+          let suspendedCount = 0;
+          let flaggedCount = 0;
+
+          for (const reg of registrations) {
+            if (reg.suspended) {
+              suspendedCount++;
+            } else if (reg.emailVerified) {
+              verifiedCount++;
+            } else {
+              unverifiedCount++;
+            }
+            if (reg.flagged) flaggedCount++;
+            const br = reg.branch || 'Unspecified';
+            byBranch[br] = (byBranch[br] || 0) + 1;
+            const tr = reg.track || reg.language || 'Python';
+            byTrack[tr] = (byTrack[tr] || 0) + 1;
+          }
+
+          return {
+            registrations,
+            summary: {
+              total: registrations.length,
+              verified: verifiedCount,
+              unverified: unverifiedCount,
+              suspended: suspendedCount,
+              flagged: flaggedCount,
+              byBranch,
+              byTrack
+            },
+            registrationSettings: getRegistrationSettings(store)
+          };
+        };
+
+        return sendJson(200, buildRegistrationsPayload());
+      }
+
+      // 1.12 Admin Registration Actions (flag, suspend, unsuspend, verify, delete, update_settings): POST /api/admin/registrations/action
+      if (url === '/api/admin/registrations/action' && req.method === 'POST') {
+        const action = body.action;
+        store.students = store.students || [];
+
+        if (action === 'update_settings') {
+          const currentSettings = getRegistrationSettings(store);
+          const nextSettings = {
+            ...currentSettings,
+            allowlistEnabled:
+              body.allowlistEnabled !== undefined ? Boolean(body.allowlistEnabled) : currentSettings.allowlistEnabled,
+            allowedDomains: Array.isArray(body.allowedDomains)
+              ? body.allowedDomains.map(d => String(d).trim().toLowerCase()).filter(Boolean)
+              : typeof body.allowedDomains === 'string'
+                ? body.allowedDomains.split(',').map(d => d.trim().toLowerCase()).filter(Boolean)
+                : currentSettings.allowedDomains,
+            phoneVerificationRequired:
+              body.phoneVerificationRequired !== undefined
+                ? Boolean(body.phoneVerificationRequired)
+                : currentSettings.phoneVerificationRequired
+          };
+          store.registrationSettings = nextSettings;
+          saveStore(store);
+          return sendJson(200, {
+            success: true,
+            message: 'Registration & verification settings updated.',
+            registrationSettings: getRegistrationSettings(store)
+          });
+        }
+
+        const targetPrn = String(body.prn || '').trim().toUpperCase();
+        const targetUid = String(body.uid || body.userId || '').trim();
+        const idx = store.students.findIndex(
+          s =>
+            (targetPrn && String(s.prn || '').trim().toUpperCase() === targetPrn) ||
+            (targetUid && s.uid === targetUid)
+        );
+
+        if (idx < 0) {
+          return sendJson(404, { error: 'Student registration record not found.' });
+        }
+
+        const student = store.students[idx];
+
+        if (action === 'flag') {
+          student.flagged = body.flagged !== undefined ? Boolean(body.flagged) : !student.flagged;
+          student.flagReason = student.flagged ? (body.reason || 'Flagged as suspicious by administrator') : null;
+          student.updatedAt = new Date().toISOString();
+          saveStore(store);
+          return sendJson(200, {
+            success: true,
+            message: student.flagged ? `Flagged ${student.name} (${student.prn}).` : `Unflagged ${student.name}.`,
+            student: decorateStudentForClient(student)
+          });
+        }
+
+        if (action === 'suspend') {
+          student.suspended = true;
+          student.accountStatus = 'suspended';
+          student.suspendedReason = body.reason || 'Suspended by administrator for policy violation';
+          student.sessionToken = null;
+          student.updatedAt = new Date().toISOString();
+          saveStore(store);
+          return sendJson(200, {
+            success: true,
+            message: `Account ${student.name} (${student.prn}) has been suspended.`,
+            student: decorateStudentForClient(student)
+          });
+        }
+
+        if (action === 'unsuspend') {
+          student.suspended = false;
+          student.suspendedReason = null;
+          student.accountStatus = student.emailVerified ? 'verified' : 'legacy_active';
+          student.updatedAt = new Date().toISOString();
+          saveStore(store);
+          return sendJson(200, {
+            success: true,
+            message: `Account ${student.name} (${student.prn}) has been restored.`,
+            student: decorateStudentForClient(student)
+          });
+        }
+
+        if (action === 'verify') {
+          student.emailVerified = true;
+          student.phoneVerified = true;
+          student.accountStatus = 'verified';
+          student.needsLegacyVerification = false;
+          student.verifiedAt = new Date().toISOString();
+          student.updatedAt = new Date().toISOString();
+          if (store.pendingVerifications && student.prn) {
+            delete store.pendingVerifications[String(student.prn).trim().toUpperCase()];
+          }
+          saveStore(store);
+          return sendJson(200, {
+            success: true,
+            message: `Account ${student.name} (${student.prn}) manually marked as verified.`,
+            student: decorateStudentForClient(student)
+          });
+        }
+
+        if (action === 'delete') {
+          const removed = store.students.splice(idx, 1)[0];
+          const removedPrn = String(removed.prn || '').trim().toUpperCase();
+          if (store.pendingVerifications && removedPrn) {
+            delete store.pendingVerifications[removedPrn];
+          }
+          store.submissions = (store.submissions || []).filter(
+            sub => String(sub.prn || '').trim().toUpperCase() !== removedPrn && sub.userId !== removed.uid
+          );
+          saveStore(store);
+          return sendJson(200, {
+            success: true,
+            message: `Deleted fake/unwanted account ${removed.name} (${removed.prn}).`,
+            deletedPrn: removedPrn,
+            leaderboard: computeSharedLeaderboard(store)
+          });
+        }
+
+        return sendJson(400, { error: `Unknown registration action: ${action}` });
+      }
+
       // Fallthrough for unmatched /api/admin/* route
       return sendJson(404, { error: "Not found" });
     }
@@ -1774,32 +2064,13 @@ export function createApiMiddleware() {
     // 5.1 Fetch Shared Application State & Current Student Profile: GET /api/state
     if (url === '/api/state' && (req.method === 'GET' || req.method === 'POST')) {
       const activeStudent = resolveStudentFromToken();
+      const eligibleStudent = activeStudent && isStudentEligibleForActiveAccess(activeStudent) ? activeStudent : null;
       const leaderboard = computeSharedLeaderboard(store);
       return sendJson(200, {
-        user: activeStudent
-          ? {
-              uid: activeStudent.uid,
-              name: activeStudent.name,
-              email: activeStudent.email,
-              prn: activeStudent.prn,
-              year: activeStudent.year,
-              branch: activeStudent.branch,
-              language: activeStudent.language || activeStudent.track || 'Python',
-              track: activeStudent.track || activeStudent.language || 'Python',
-              role: 'student'
-            }
-          : null,
-        students: (store.students || []).map(s => ({
-          uid: s.uid,
-          name: s.name,
-          prn: s.prn,
-          email: s.email,
-          year: s.year,
-          branch: s.branch,
-          language: s.language || s.track || 'Python',
-          track: s.track || s.language || 'Python',
-          role: 'student'
-        })),
+        user: eligibleStudent ? decorateStudentForClient(eligibleStudent) : null,
+        students: (store.students || [])
+          .filter(s => isStudentEligibleForActiveAccess(s))
+          .map(s => decorateStudentForClient(s)),
         submissions: store.submissions || [],
         leaderboard,
         certificates: store.certificates || [],
@@ -1810,99 +2081,625 @@ export function createApiMiddleware() {
         allowExitedStudentsForCert: store.allowExitedStudentsForCert ?? false,
         judgingSettings: store.judgingSettings || {},
         proctoringSettings: store.proctoringSettings || {},
+        registrationSettings: getRegistrationSettings(store),
         supabaseConnected: isSupabaseConfigured()
       });
     }
 
-    // 5.2 Student Login / Registration (Single Source of Truth): POST /api/students/login
-    if (url === '/api/students/login' && req.method === 'POST') {
-      const rawPrn = String(body.prn || '').trim().toUpperCase();
-      const rawEmail = String(body.email || '').trim().toLowerCase();
-      const rawName = String(body.name || '').trim();
-      const mode = body.mode || (rawName ? 'register_or_update' : 'lookup');
+    // 5.15 Multi-Step Verified Registration Start: POST /api/auth/register/start
+    if (url === '/api/auth/register/start' && req.method === 'POST') {
+      const now = Date.now();
+      const regSettings = getRegistrationSettings(store);
 
-      if (!rawPrn && !rawEmail) {
-        return sendJson(400, { error: "Please enter your College Roll Number (or Email Address)." });
-      }
-
-      store.students = store.students || [];
-      store.submissions = store.submissions || [];
-
-      // Look up existing student in store.students by PRN or Email
-      let existingIdx = store.students.findIndex(
-        s =>
-          (rawPrn && String(s.prn || '').trim().toUpperCase() === rawPrn) ||
-          (rawEmail && String(s.email || '').trim().toLowerCase() === rawEmail)
-      );
-
-      // Also check if student exists in store.submissions (in case submission was synced first)
-      const matchingSub = store.submissions.find(
-        sub =>
-          (rawPrn && String(sub.prn || '').trim().toUpperCase() === rawPrn) ||
-          (rawEmail && String(sub.email || '').trim().toLowerCase() === rawEmail)
-      );
-
-      if (mode === 'lookup' && existingIdx < 0 && !matchingSub) {
-        return sendJson(404, {
-          error: `No registered student found with Roll Number "${rawPrn || rawEmail}". Please complete New Student Registration below.`
+      // 1. Honeypot check
+      if (body.website_url || body.honeypot) {
+        return sendJson(400, {
+          error: 'Automated submission blocked by security filter.',
+          code: 'BOT_HONEYPOT'
         });
       }
 
-      const existingStudent = existingIdx >= 0 ? store.students[existingIdx] : null;
-      const finalPrn = rawPrn || existingStudent?.prn || matchingSub?.prn;
-      const cleanPrnId = String(finalPrn).replace(/[^A-Z0-9]/gi, '').toUpperCase();
-      const finalUid = existingStudent?.uid || matchingSub?.userId || `svit-stu-${cleanPrnId}`;
-      const finalName = rawName || existingStudent?.name || matchingSub?.studentName || 'Student';
-      const finalEmail = rawEmail || existingStudent?.email || `${cleanPrnId.toLowerCase()}@svit.ac.in`;
-      const finalYear = body.year || existingStudent?.year || 'First Year (FE)';
-      const finalBranch = body.branch || existingStudent?.branch || 'Computer Engineering';
-      const finalLanguage = body.language || body.track || existingStudent?.language || existingStudent?.track || matchingSub?.language || 'Python';
-
-      const studentRecord = {
-        uid: finalUid,
-        name: finalName,
-        email: finalEmail,
-        prn: finalPrn,
-        year: finalYear,
-        branch: finalBranch,
-        language: finalLanguage,
-        track: finalLanguage,
-        role: 'student',
-        updatedAt: new Date().toISOString()
-      };
-
-      const sessionToken = createStudentSessionToken(studentRecord);
-      studentRecord.sessionToken = sessionToken;
-
-      if (existingIdx >= 0) {
-        store.students[existingIdx] = { ...store.students[existingIdx], ...studentRecord };
-      } else {
-        store.students.push(studentRecord);
+      // 2. Minimum time-to-submit check (default 2.5 seconds)
+      if (body.formLoadedAt) {
+        const elapsedMs = now - Number(body.formLoadedAt);
+        const minMs = Number(regSettings.minSubmitTimeMs || 2500);
+        if (elapsedMs >= 0 && elapsedMs < minMs) {
+          return sendJson(400, {
+            error: 'Form submitted too quickly. Please review your registration details carefully and try again.',
+            code: 'SUBMIT_TOO_FAST'
+          });
+        }
       }
 
-      // Normalize any existing submissions for this Roll Number so userId, name, and track stay in sync
-      store.submissions = store.submissions.map(sub => {
-        if (String(sub.prn || '').trim().toUpperCase() === finalPrn || sub.userId === finalUid) {
+      // 3. Turnstile / hCaptcha verification
+      const captchaResult = await verifyCaptchaToken(body.captchaToken, clientIp);
+      if (!captchaResult.valid) {
+        return sendJson(400, {
+          error: captchaResult.error || 'Security challenge verification failed.',
+          code: 'CAPTCHA_FAILED'
+        });
+      }
+
+      // 4. Per-IP Registration Rate Limit (max 15 attempts per 10 mins)
+      const ipRate = checkScopedRateLimit(store, `reg_ip:${clientIp}`, 15, 10 * 60 * 1000);
+      if (!ipRate.allowed) {
+        saveStore(store);
+        return sendJson(429, {
+          error: `Too many registration attempts from your network. Please wait ${ipRate.retryAfterSeconds}s before trying again.`,
+          retryAfterSeconds: ipRate.retryAfterSeconds
+        });
+      }
+
+      // 5. Server-side validation of all required registration fields
+      const validation = validateRegistrationPayload(body, {
+        allowlistEnabled: regSettings.allowlistEnabled,
+        allowedDomains: regSettings.allowedDomains
+      });
+
+      if (!validation.valid) {
+        const firstErr = Object.values(validation.errors)[0] || 'Please fix the highlighted registration errors.';
+        return sendJson(400, {
+          error: firstErr,
+          fieldErrors: validation.errors
+        });
+      }
+
+      const sanitized = validation.sanitized;
+
+      // 6. Verify DNS MX records for the email domain
+      const mxCheck = await verifyEmailDomainMx(sanitized.emailDomain);
+      if (!mxCheck.valid) {
+        return sendJson(400, {
+          error: mxCheck.error,
+          fieldErrors: { email: mxCheck.error }
+        });
+      }
+
+      // 7. Uniqueness enforcement: one account per verified/normalized email, one per mobile number, one per roll number
+      store.students = store.students || [];
+      const isLegacyUpgrade = Boolean(body.isLegacyUpgrade);
+
+      for (const existing of store.students) {
+        const existingPrn = String(existing.prn || '').trim().toUpperCase();
+        const existingNormEmail =
+          existing.normalizedEmail || normalizeEmail(existing.email || '') || '';
+        const existingPhone = existing.phone ? normalizeIndianPhone(existing.phone) : '';
+        const isSameStudentRecord = existingPrn === sanitized.prn;
+
+        // Check duplicate normalized email across any other student record (or same record if already verified and not legacy upgrade)
+        if (existingNormEmail && existingNormEmail === sanitized.normalizedEmail) {
+          if (!isSameStudentRecord || (existing.emailVerified && !isLegacyUpgrade)) {
+            return sendJson(409, {
+              error: 'An account with this email address is already registered. Only one account per student email is allowed.',
+              fieldErrors: {
+                email: 'This email address is already registered (including Gmail dot/+alias variations).'
+              }
+            });
+          }
+        }
+
+        // Check duplicate mobile number
+        if (existingPhone && existingPhone === sanitized.phone) {
+          if (!isSameStudentRecord || (existing.phoneVerified && !isLegacyUpgrade)) {
+            return sendJson(409, {
+              error: 'An account with this mobile number is already registered. Only one account per mobile number is allowed.',
+              fieldErrors: {
+                phone: 'This mobile number (+91) is already linked to an existing registration.'
+              }
+            });
+          }
+        }
+
+        // Check duplicate Roll Number
+        if (isSameStudentRecord && !isLegacyUpgrade && existing.accountStatus !== 'unverified') {
+          return sendJson(409, {
+            error: 'This College Roll Number is already registered. Please use Returning Student Login instead.',
+            fieldErrors: {
+              prn: 'This College Roll Number is already registered.'
+            }
+          });
+        }
+      }
+
+      // 8. Check 60-second resend cooldown & per-email OTP rate limit
+      store.pendingVerifications = store.pendingVerifications || {};
+      const existingPending = store.pendingVerifications[sanitized.prn];
+      if (existingPending && existingPending.lastSentAt && !body.bypassCooldown) {
+        const elapsedSinceLastOtp = now - existingPending.lastSentAt;
+        if (elapsedSinceLastOtp < 60 * 1000 && existingPending.normalizedEmail === sanitized.normalizedEmail) {
+          const waitSec = Math.ceil((60 * 1000 - elapsedSinceLastOtp) / 1000);
+          return sendJson(429, {
+            error: `An OTP was recently sent to ${sanitized.email}. Please wait ${waitSec}s before requesting another code.`,
+            retryAfterSeconds: waitSec
+          });
+        }
+      }
+
+      const emailOtpRate = checkScopedRateLimit(store, `otp_send:${sanitized.normalizedEmail}`, 5, 15 * 60 * 1000);
+      if (!emailOtpRate.allowed) {
+        saveStore(store);
+        return sendJson(429, {
+          error: `Too many OTP requests for ${sanitized.email}. Please wait ${emailOtpRate.retryAfterSeconds}s before retrying.`,
+          retryAfterSeconds: emailOtpRate.retryAfterSeconds
+        });
+      }
+
+      // 9. Generate 6-digit OTP and store ONLY its cryptographic HMAC-SHA256 hash
+      const emailOtp = generateSixDigitOtp();
+      const emailOtpHash = hashOtp(sanitized.normalizedEmail, emailOtp);
+
+      store.pendingVerifications[sanitized.prn] = {
+        prn: sanitized.prn,
+        name: sanitized.name,
+        email: sanitized.email,
+        normalizedEmail: sanitized.normalizedEmail,
+        phone: sanitized.phone,
+        branch: sanitized.branch,
+        year: sanitized.year,
+        division: sanitized.division,
+        track: sanitized.track,
+        language: sanitized.language,
+        emailOtpHash,
+        emailAttempts: 0,
+        maxAttempts: 5,
+        emailExpiresAt: now + 10 * 60 * 1000, // 10 minutes
+        lastSentAt: now,
+        emailVerified: false,
+        phoneOtpHash: null,
+        phoneAttempts: 0,
+        phoneExpiresAt: 0,
+        phoneLastSentAt: 0,
+        phoneVerified: false,
+        isLegacyUpgrade
+      };
+
+      // 10. Create or update student record in store.students
+      const cleanPrnId = sanitized.prn.replace(/[^A-Z0-9]/gi, '').toUpperCase();
+      const existingStuIdx = store.students.findIndex(
+        s => String(s.prn || '').trim().toUpperCase() === sanitized.prn
+      );
+
+      if (existingStuIdx >= 0) {
+        const prevStu = store.students[existingStuIdx];
+        store.students[existingStuIdx] = {
+          ...prevStu,
+          name: sanitized.name,
+          email: sanitized.email,
+          normalizedEmail: sanitized.normalizedEmail,
+          phone: sanitized.phone,
+          branch: sanitized.branch,
+          year: sanitized.year,
+          division: sanitized.division,
+          track: sanitized.track,
+          language: sanitized.language,
+          genuineConsent: true,
+          consentTimestamp: new Date(now).toISOString(),
+          // Preserve legacy_active status for existing students until they finish verifying so their data stays intact
+          accountStatus: isLegacyUpgrade && prevStu.accountStatus !== 'unverified' ? 'legacy_active' : 'unverified',
+          updatedAt: new Date(now).toISOString()
+        };
+      } else {
+        store.students.push({
+          uid: `svit-stu-${cleanPrnId}`,
+          prn: sanitized.prn,
+          name: sanitized.name,
+          email: sanitized.email,
+          normalizedEmail: sanitized.normalizedEmail,
+          phone: sanitized.phone,
+          branch: sanitized.branch,
+          year: sanitized.year,
+          division: sanitized.division,
+          track: sanitized.track,
+          language: sanitized.language,
+          role: 'student',
+          emailVerified: false,
+          phoneVerified: false,
+          accountStatus: 'unverified',
+          genuineConsent: true,
+          consentTimestamp: new Date(now).toISOString(),
+          registeredAt: new Date(now).toISOString(),
+          updatedAt: new Date(now).toISOString()
+        });
+      }
+
+      saveStore(store);
+
+      const emailDispatch = await sendVerificationEmailOtp({
+        toEmail: sanitized.email,
+        studentName: sanitized.name,
+        otpCode: emailOtp
+      });
+
+      return sendJson(200, {
+        success: true,
+        step: 'verify_email',
+        prn: sanitized.prn,
+        email: sanitized.email,
+        phone: sanitized.phone,
+        expiresInSeconds: 600,
+        resendCooldownSeconds: 60,
+        phoneVerificationRequired: Boolean(regSettings.phoneVerificationRequired),
+        deliveryMode: emailDispatch.provider,
+        ...(emailDispatch.simulated ? { sandboxOtp: emailOtp } : {})
+      });
+    }
+
+    // 5.16 Resend Email or Phone OTP (60s cooldown + rate limit): POST /api/auth/otp/resend
+    if (url === '/api/auth/otp/resend' && req.method === 'POST') {
+      const now = Date.now();
+      const normPrn = String(body.prn || '').trim().toUpperCase();
+      const channel = body.channel === 'phone' ? 'phone' : 'email';
+
+      store.pendingVerifications = store.pendingVerifications || {};
+      const pending = store.pendingVerifications[normPrn];
+      if (!pending) {
+        return sendJson(404, {
+          error: 'No pending verification session found. Please start registration again.'
+        });
+      }
+
+      const lastSent = channel === 'phone' ? pending.phoneLastSentAt : pending.lastSentAt;
+      if (lastSent && now - lastSent < 60 * 1000 && !body.bypassCooldown) {
+        const waitSec = Math.ceil((60 * 1000 - (now - lastSent)) / 1000);
+        return sendJson(429, {
+          error: `Please wait ${waitSec} seconds before requesting a new OTP.`,
+          retryAfterSeconds: waitSec
+        });
+      }
+
+      const targetIdentifier = channel === 'phone' ? pending.phone : pending.normalizedEmail;
+      const sendRate = checkScopedRateLimit(store, `otp_send:${targetIdentifier}`, 5, 15 * 60 * 1000);
+      if (!sendRate.allowed) {
+        saveStore(store);
+        return sendJson(429, {
+          error: `Maximum OTP resend limit reached. Please wait ${sendRate.retryAfterSeconds}s before retrying.`,
+          retryAfterSeconds: sendRate.retryAfterSeconds
+        });
+      }
+
+      const newOtp = generateSixDigitOtp();
+      if (channel === 'phone') {
+        pending.phoneOtpHash = hashOtp(pending.phone, newOtp);
+        pending.phoneAttempts = 0;
+        pending.phoneExpiresAt = now + 10 * 60 * 1000;
+        pending.phoneLastSentAt = now;
+        saveStore(store);
+
+        const smsDispatch = await sendVerificationPhoneOtp({
+          phone: pending.phone,
+          otpCode: newOtp
+        });
+
+        return sendJson(200, {
+          success: true,
+          channel: 'phone',
+          expiresInSeconds: 600,
+          resendCooldownSeconds: 60,
+          deliveryMode: smsDispatch.provider,
+          ...(smsDispatch.simulated ? { sandboxPhoneOtp: newOtp } : {})
+        });
+      } else {
+        pending.emailOtpHash = hashOtp(pending.normalizedEmail, newOtp);
+        pending.emailAttempts = 0;
+        pending.emailExpiresAt = now + 10 * 60 * 1000;
+        pending.lastSentAt = now;
+        saveStore(store);
+
+        const emailDispatch = await sendVerificationEmailOtp({
+          toEmail: pending.email,
+          studentName: pending.name,
+          otpCode: newOtp
+        });
+
+        return sendJson(200, {
+          success: true,
+          channel: 'email',
+          expiresInSeconds: 600,
+          resendCooldownSeconds: 60,
+          deliveryMode: emailDispatch.provider,
+          ...(emailDispatch.simulated ? { sandboxOtp: newOtp } : {})
+        });
+      }
+    }
+
+    // 5.17 Verify Email OTP (10-min expiry, max 5 attempts, hashed comparison): POST /api/auth/otp/verify-email
+    if (url === '/api/auth/otp/verify-email' && req.method === 'POST') {
+      const now = Date.now();
+      const normPrn = String(body.prn || '').trim().toUpperCase();
+      const otpInput = String(body.otp || '').trim();
+      const regSettings = getRegistrationSettings(store);
+
+      const ipVerifyRate = checkScopedRateLimit(store, `otp_verify_ip:${clientIp}`, 20, 10 * 60 * 1000);
+      if (!ipVerifyRate.allowed) {
+        saveStore(store);
+        return sendJson(429, {
+          error: `Too many OTP verification attempts. Please wait ${ipVerifyRate.retryAfterSeconds}s.`
+        });
+      }
+
+      store.pendingVerifications = store.pendingVerifications || {};
+      const pending = store.pendingVerifications[normPrn];
+      if (!pending) {
+        return sendJson(404, {
+          error: 'Verification session not found or already completed. Please request a new OTP.'
+        });
+      }
+
+      // Allow deterministic test simulation of OTP expiry when body.simulateExpired === true
+      if (body.simulateExpired === true) {
+        pending.emailExpiresAt = now - 1000;
+      }
+
+      if (now > pending.emailExpiresAt) {
+        saveStore(store);
+        return sendJson(400, {
+          error: 'Your 6-digit OTP has expired (valid for 10 minutes). Please click Resend OTP to receive a new code.',
+          expired: true
+        });
+      }
+
+      if ((pending.emailAttempts || 0) >= (pending.maxAttempts || 5)) {
+        return sendJson(429, {
+          error: 'Maximum of 5 verification attempts exceeded for this OTP. Please click Resend OTP to generate a new code.',
+          maxAttemptsReached: true
+        });
+      }
+
+      if (!/^\d{6}$/.test(otpInput)) {
+        return sendJson(400, {
+          error: 'Please enter a valid 6-digit numeric OTP code.'
+        });
+      }
+
+      const isOtpValid = verifyOtpHash(pending.normalizedEmail, otpInput, pending.emailOtpHash);
+      if (!isOtpValid) {
+        pending.emailAttempts = (pending.emailAttempts || 0) + 1;
+        const remaining = Math.max(0, (pending.maxAttempts || 5) - pending.emailAttempts);
+        saveStore(store);
+        return sendJson(400, {
+          error:
+            remaining > 0
+              ? `Incorrect OTP code. You have ${remaining} attempt(s) remaining.`
+              : 'Incorrect OTP code. Maximum of 5 attempts reached — please request a new OTP.',
+          attemptsRemaining: remaining,
+          maxAttemptsReached: remaining === 0
+        });
+      }
+
+      // OTP is valid! Mark email verified
+      pending.emailVerified = true;
+      pending.emailOtpHash = null;
+
+      // Update student record
+      store.students = store.students || [];
+      const stuIdx = store.students.findIndex(s => String(s.prn || '').trim().toUpperCase() === normPrn);
+      if (stuIdx >= 0) {
+        store.students[stuIdx].emailVerified = true;
+        store.students[stuIdx].emailVerifiedAt = new Date(now).toISOString();
+      }
+
+      // Generate Phone OTP for Step 3 (Verify Phone)
+      const phoneOtp = generateSixDigitOtp();
+      pending.phoneOtpHash = hashOtp(pending.phone, phoneOtp);
+      pending.phoneAttempts = 0;
+      pending.phoneExpiresAt = now + 10 * 60 * 1000;
+      pending.phoneLastSentAt = now;
+      saveStore(store);
+
+      const smsDispatch = await sendVerificationPhoneOtp({
+        phone: pending.phone,
+        otpCode: phoneOtp
+      });
+
+      return sendJson(200, {
+        success: true,
+        emailVerified: true,
+        nextStep: 'verify_phone',
+        prn: normPrn,
+        phone: pending.phone,
+        phoneVerificationRequired: Boolean(regSettings.phoneVerificationRequired),
+        phoneDeliveryMode: smsDispatch.provider,
+        ...(smsDispatch.simulated ? { sandboxPhoneOtp: phoneOtp } : {})
+      });
+    }
+
+    // 5.18 Verify Phone / Complete Registration: POST /api/auth/otp/verify-phone
+    if (url === '/api/auth/otp/verify-phone' && req.method === 'POST') {
+      const now = Date.now();
+      const normPrn = String(body.prn || '').trim().toUpperCase();
+      const otpInput = String(body.otp || '').trim();
+      const skipSmsOtp = Boolean(body.skipSmsOtp);
+      const regSettings = getRegistrationSettings(store);
+
+      store.pendingVerifications = store.pendingVerifications || {};
+      const pending = store.pendingVerifications[normPrn];
+      if (!pending) {
+        return sendJson(404, {
+          error: 'Verification session not found. Please sign in or restart verification.'
+        });
+      }
+
+      if (!pending.emailVerified) {
+        return sendJson(403, {
+          error: 'Email verification must be completed before mobile verification.'
+        });
+      }
+
+      // If SMS verification is required by config OR user entered an OTP code
+      if (regSettings.phoneVerificationRequired || (!skipSmsOtp && otpInput)) {
+        if (now > pending.phoneExpiresAt) {
+          return sendJson(400, {
+            error: 'Mobile OTP has expired (10 minutes). Please click Resend SMS OTP.',
+            expired: true
+          });
+        }
+        if ((pending.phoneAttempts || 0) >= 5) {
+          return sendJson(429, {
+            error: 'Maximum of 5 mobile OTP attempts reached. Please resend a new SMS OTP.',
+            maxAttemptsReached: true
+          });
+        }
+        if (!/^\d{6}$/.test(otpInput)) {
+          return sendJson(400, {
+            error: 'Please enter the 6-digit Mobile OTP code.'
+          });
+        }
+        const validPhoneOtp = verifyOtpHash(pending.phone, otpInput, pending.phoneOtpHash);
+        if (!validPhoneOtp) {
+          pending.phoneAttempts = (pending.phoneAttempts || 0) + 1;
+          const remaining = Math.max(0, 5 - pending.phoneAttempts);
+          saveStore(store);
+          return sendJson(400, {
+            error: `Incorrect Mobile OTP code. ${remaining} attempt(s) remaining.`,
+            attemptsRemaining: remaining
+          });
+        }
+      }
+
+      // Finalize verified student in store.students
+      store.students = store.students || [];
+      const stuIdx = store.students.findIndex(s => String(s.prn || '').trim().toUpperCase() === normPrn);
+      if (stuIdx < 0) {
+        return sendJson(404, { error: 'Student profile not found.' });
+      }
+
+      const student = store.students[stuIdx];
+      student.emailVerified = true;
+      student.phoneVerified = Boolean(!skipSmsOtp && otpInput) || !regSettings.phoneVerificationRequired;
+      student.phoneVerificationMethod = !skipSmsOtp && otpInput ? 'sms_otp' : 'validated_indian_mobile';
+      student.accountStatus = 'verified';
+      student.needsLegacyVerification = false;
+      student.verifiedAt = new Date(now).toISOString();
+      student.updatedAt = new Date(now).toISOString();
+
+      const sessionToken = createStudentSessionToken(student);
+      student.sessionToken = sessionToken;
+
+      // Sync any submissions for this student
+      store.submissions = (store.submissions || []).map(sub => {
+        if (String(sub.prn || '').trim().toUpperCase() === normPrn || sub.userId === student.uid) {
           return {
             ...sub,
-            userId: finalUid,
-            prn: finalPrn,
-            studentName: finalName,
-            language: sub.language || finalLanguage,
-            track: sub.track || finalLanguage
+            userId: student.uid,
+            prn: normPrn,
+            studentName: student.name,
+            language: sub.language || student.language,
+            track: sub.track || student.track
           };
         }
         return sub;
       });
 
+      delete store.pendingVerifications[normPrn];
       saveStore(store);
 
-      const { sessionToken: _omit, ...publicUser } = studentRecord;
       return sendJson(200, {
         success: true,
-        user: publicUser,
+        step: 'done',
+        user: decorateStudentForClient(student),
         sessionToken,
-        students: store.students.map(({ sessionToken: _st, ...rest }) => rest),
+        students: store.students
+          .filter(s => isStudentEligibleForActiveAccess(s))
+          .map(s => decorateStudentForClient(s)),
+        submissions: store.submissions,
+        leaderboard: computeSharedLeaderboard(store)
+      });
+    }
+
+    // 5.2 Returning Student Login (Non-enumerating, rate-limited, bot-protected): POST /api/students/login
+    if (url === '/api/students/login' && req.method === 'POST') {
+      const now = Date.now();
+
+      // 1. Honeypot check
+      if (body.website_url || body.honeypot) {
+        return sendJson(400, { error: 'Automated submission blocked.' });
+      }
+
+      // 2. Per-IP Login Rate Limit
+      const loginRate = checkScopedRateLimit(store, `login_ip:${clientIp}`, 15, 10 * 60 * 1000);
+      if (!loginRate.allowed) {
+        saveStore(store);
+        return sendJson(429, {
+          error: `Too many sign-in attempts. Please wait ${loginRate.retryAfterSeconds}s before trying again.`
+        });
+      }
+
+      // 3. Turnstile / hCaptcha verification if token provided
+      if (body.captchaToken !== undefined) {
+        const captchaCheck = await verifyCaptchaToken(body.captchaToken, clientIp);
+        if (!captchaCheck.valid) {
+          return sendJson(400, { error: captchaCheck.error });
+        }
+      }
+
+      const rawPrn = String(body.prn || '').trim().toUpperCase();
+      const rawEmail = String(body.email || '').trim().toLowerCase();
+      const normInputEmail = rawEmail ? normalizeEmail(rawEmail) : '';
+
+      if (!rawPrn && !rawEmail) {
+        return sendJson(400, { error: 'Please enter your College Roll Number and Email Address.' });
+      }
+
+      store.students = store.students || [];
+      store.submissions = store.submissions || [];
+
+      // Look up existing student by PRN or Normalized Email
+      const existingIdx = store.students.findIndex(s => {
+        const sPrn = String(s.prn || '').trim().toUpperCase();
+        const sNormEmail = s.normalizedEmail || normalizeEmail(s.email || '') || '';
+        if (rawPrn && normInputEmail) {
+          return sPrn === rawPrn && (!sNormEmail || sNormEmail === normInputEmail);
+        }
+        if (rawPrn) return sPrn === rawPrn;
+        if (normInputEmail) return sNormEmail === normInputEmail;
+        return false;
+      });
+
+      const genericLoginError =
+        'Unable to sign in with the provided details. Please verify your Roll Number and Email Address, or complete New Student Registration.';
+
+      if (existingIdx < 0) {
+        // Do NOT reveal whether the email or roll number exists
+        return sendJson(401, { error: genericLoginError });
+      }
+
+      const existingStudent = store.students[existingIdx];
+
+      if (existingStudent.suspended || existingStudent.accountStatus === 'suspended') {
+        return sendJson(403, {
+          error: 'This account has been suspended by the event administrator.'
+        });
+      }
+
+      if (existingStudent.accountStatus === 'unverified') {
+        return sendJson(403, {
+          error: 'Your email verification is pending. Please verify the 6-digit OTP sent to your email to activate your account.',
+          requiresVerification: true,
+          prn: existingStudent.prn,
+          email: existingStudent.email,
+          phone: existingStudent.phone || ''
+        });
+      }
+
+      // Allow track update if explicitly passed during profile sync
+      if (body.language || body.track) {
+        existingStudent.language = body.language || body.track;
+        existingStudent.track = body.track || body.language;
+      }
+      existingStudent.updatedAt = new Date(now).toISOString();
+
+      const sessionToken = createStudentSessionToken(existingStudent);
+      existingStudent.sessionToken = sessionToken;
+
+      saveStore(store);
+
+      return sendJson(200, {
+        success: true,
+        user: decorateStudentForClient(existingStudent),
+        sessionToken,
+        students: store.students
+          .filter(s => isStudentEligibleForActiveAccess(s))
+          .map(s => decorateStudentForClient(s)),
         submissions: store.submissions,
         leaderboard: computeSharedLeaderboard(store)
       });
@@ -1928,11 +2725,21 @@ export function createApiMiddleware() {
       const normPrn = String(sub.prn || '').trim().toUpperCase();
       const dayNum = Number(sub.day);
 
-      // Ensure student exists in store.students
+      // Ensure student exists in store.students and is eligible (not unverified or suspended)
       store.students = store.students || [];
       const stuIdx = store.students.findIndex(
         s => (normPrn && String(s.prn || '').trim().toUpperCase() === normPrn) || (sub.userId && s.uid === sub.userId)
       );
+
+      if (stuIdx >= 0 && !isStudentEligibleForActiveAccess(store.students[stuIdx])) {
+        return sendJson(403, {
+          error:
+            store.students[stuIdx].accountStatus === 'unverified'
+              ? 'Unverified accounts cannot submit programs or quizzes. Please verify your email OTP first.'
+              : 'Suspended accounts cannot submit programs or quizzes.'
+        });
+      }
+
       const canonicalUid = stuIdx >= 0 ? store.students[stuIdx].uid : (sub.userId || `svit-stu-${normPrn}`);
       const canonicalName = stuIdx >= 0 ? store.students[stuIdx].name : (sub.studentName || 'Student');
       const canonicalLang = sub.language || sub.track || (stuIdx >= 0 ? store.students[stuIdx].language : 'Python');
@@ -1948,6 +2755,7 @@ export function createApiMiddleware() {
           language: canonicalLang,
           track: canonicalLang,
           role: 'student',
+          accountStatus: 'legacy_active',
           updatedAt: new Date().toISOString()
         });
       }
@@ -2020,7 +2828,7 @@ export function createApiMiddleware() {
 
       return sendJson(200, {
         leaderboard: filtered,
-        totalStudents: (store.students || []).length,
+        totalStudents: (store.students || []).filter(s => isStudentEligibleForActiveAccess(s)).length,
         totalSubmissions: (store.submissions || []).length
       });
     }
@@ -2048,11 +2856,10 @@ export function createApiMiddleware() {
       if (body.user && body.user.role !== 'admin' && body.user.prn) {
         const normPrn = String(body.user.prn).trim().toUpperCase();
         const idx = (store.students || []).findIndex(s => String(s.prn || '').trim().toUpperCase() === normPrn);
-        if (idx >= 0) {
+        if (idx >= 0 && isStudentEligibleForActiveAccess(store.students[idx])) {
           issuedSessionToken = createStudentSessionToken(store.students[idx]);
           store.students[idx].sessionToken = issuedSessionToken;
-          const { sessionToken: _st, ...pub } = store.students[idx];
-          resolvedUser = pub;
+          resolvedUser = decorateStudentForClient(store.students[idx]);
         }
       }
 
@@ -2062,7 +2869,9 @@ export function createApiMiddleware() {
         success: true,
         sessionToken: issuedSessionToken,
         user: resolvedUser,
-        students: (store.students || []).map(({ sessionToken: _st, ...rest }) => rest),
+        students: (store.students || [])
+          .filter(s => isStudentEligibleForActiveAccess(s))
+          .map(s => decorateStudentForClient(s)),
         submissions: store.submissions || [],
         leaderboard: computeSharedLeaderboard(store),
         certificates: store.certificates || [],

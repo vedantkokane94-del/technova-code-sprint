@@ -22,6 +22,11 @@ export function isSupabaseConfigured() {
 }
 
 function getDefaultStore() {
+  const defaultAllowedDomains = (process.env.ALLOWED_EMAIL_DOMAINS || 'svit.ac.in')
+    .split(',')
+    .map(d => d.trim().toLowerCase())
+    .filter(Boolean);
+
   return {
     students: [],
     submissions: [],
@@ -32,6 +37,13 @@ function getDefaultStore() {
     emailLogs: [],
     resultsPublished: false,
     allowExitedStudentsForCert: false,
+    pendingVerifications: {},
+    registrationRateLimits: {},
+    registrationSettings: {
+      allowlistEnabled: process.env.ALLOWED_EMAIL_DOMAINS_ENABLED === 'true',
+      allowedDomains: defaultAllowedDomains,
+      phoneVerificationRequired: process.env.PHONE_VERIFICATION_REQUIRED === 'true'
+    },
     certificateAudit: {
       generationCount: 0,
       downloadCount: 0,
@@ -77,6 +89,12 @@ function normalizeStore(store) {
     emailLogs: Array.isArray(store.emailLogs) ? store.emailLogs : [],
     resultsPublished: store.resultsPublished ?? false,
     allowExitedStudentsForCert: store.allowExitedStudentsForCert ?? false,
+    pendingVerifications: store.pendingVerifications && typeof store.pendingVerifications === 'object' ? store.pendingVerifications : {},
+    registrationRateLimits: store.registrationRateLimits && typeof store.registrationRateLimits === 'object' ? store.registrationRateLimits : {},
+    registrationSettings: {
+      ...defaults.registrationSettings,
+      ...(store.registrationSettings && typeof store.registrationSettings === 'object' ? store.registrationSettings : {})
+    },
     activeTestSessions: Array.isArray(store.activeTestSessions) ? store.activeTestSessions : [],
     studentConsents: Array.isArray(store.studentConsents) ? store.studentConsents : [],
     blockedAttempts: Array.isArray(store.blockedAttempts) ? store.blockedAttempts : [],
@@ -90,19 +108,22 @@ function normalizeStore(store) {
  * Read store from memory -> /tmp (on serverless) -> root data-store.json
  */
 export function readLocalStore() {
-  if (globalThis.__TECHNOVA_SHARED_STORE__) {
+  const isVercel = Boolean(process.env.VERCEL);
+  if (isVercel && globalThis.__TECHNOVA_SHARED_STORE__) {
     return normalizeStore(globalThis.__TECHNOVA_SHARED_STORE__);
   }
 
   let loaded = null;
-  // 1. Check writable /tmp store first (for Vercel serverless persistence across invocations)
-  try {
-    if (fs.existsSync(TMP_STORE_PATH)) {
-      loaded = JSON.parse(fs.readFileSync(TMP_STORE_PATH, 'utf-8'));
-    }
-  } catch (e) {}
+  // 1. On Vercel serverless, check writable /tmp store first
+  if (isVercel) {
+    try {
+      if (fs.existsSync(TMP_STORE_PATH)) {
+        loaded = JSON.parse(fs.readFileSync(TMP_STORE_PATH, 'utf-8'));
+      }
+    } catch (e) {}
+  }
 
-  // 2. Fall back to bundled data-store.json
+  // 2. Read project root data-store.json
   if (!loaded) {
     try {
       if (fs.existsSync(ROOT_STORE_PATH)) {
@@ -271,11 +292,22 @@ export async function syncFromSupabaseIfConfigured(localStore) {
           prn: u.prn,
           name: u.name,
           email: u.email,
+          normalizedEmail: u.normalized_email || (u.email ? String(u.email).trim().toLowerCase() : ''),
+          phone: u.phone || '',
           year: u.year,
           branch: u.branch,
+          division: u.division || 'A',
           language: u.language || u.track || 'Python',
           track: u.track || u.language || 'Python',
           role: u.role || 'student',
+          genuineConsent: u.genuine_consent !== false,
+          emailVerified: Boolean(u.email_verified),
+          phoneVerified: Boolean(u.phone_verified),
+          verifiedAt: u.verified_at || null,
+          accountStatus: u.account_status || (u.email_verified ? 'verified' : 'unverified'),
+          suspendedReason: u.suspended_reason || null,
+          needsLegacyVerification: Boolean(u.needs_legacy_verification),
+          registeredAt: u.registered_at || u.created_at || null,
           sessionToken: u.session_token || null
         }));
         merged = mergeStores(merged, { students: mappedUsers });
@@ -402,11 +434,22 @@ export async function pushToSupabaseIfConfigured(store) {
           prn: String(u.prn).trim().toUpperCase(),
           name: u.name || 'Student',
           email: u.email || `${String(u.prn).trim().toLowerCase()}@svit.ac.in`,
+          normalized_email: u.normalizedEmail || (u.email ? String(u.email).trim().toLowerCase() : null),
+          phone: u.phone || null,
           year: u.year || 'First Year (FE)',
           branch: u.branch || 'Computer Engineering',
+          division: u.division || 'A',
           language: u.language || u.track || 'Python',
           track: u.track || u.language || 'Python',
           role: u.role || 'student',
+          genuine_consent: u.genuineConsent !== false,
+          email_verified: Boolean(u.emailVerified),
+          phone_verified: Boolean(u.phoneVerified),
+          verified_at: u.verifiedAt || null,
+          account_status: u.accountStatus || (u.emailVerified ? 'verified' : 'unverified'),
+          suspended_reason: u.suspendedReason || null,
+          needs_legacy_verification: Boolean(u.needsLegacyVerification),
+          registered_at: u.registeredAt || new Date().toISOString(),
           session_token: u.sessionToken || null,
           updated_at: new Date().toISOString()
         }));

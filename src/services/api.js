@@ -464,8 +464,140 @@ export async function loginOrRegisterStudentApi(payload) {
         success: false,
         status: res.status,
         notFound: Boolean(data.notFound),
+        requiresVerification: Boolean(data.requiresVerification),
+        prn: data.prn,
+        email: data.email,
+        phone: data.phone,
         error: data.error || `HTTP ${res.status}`
       };
+    }
+    return data;
+  } catch (err) {
+    return { success: false, error: err.message || 'Network request failed' };
+  }
+}
+
+export async function startRegistrationApi(payload) {
+  try {
+    const res = await fetch(apiUrl('/api/auth/register/start'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      return {
+        success: false,
+        status: res.status,
+        error: data.error || `HTTP ${res.status}`,
+        fieldErrors: data.fieldErrors || {},
+        retryAfterSeconds: data.retryAfterSeconds
+      };
+    }
+    return data;
+  } catch (err) {
+    return { success: false, error: err.message || 'Network request failed' };
+  }
+}
+
+export async function resendOtpApi(payload) {
+  try {
+    const res = await fetch(apiUrl('/api/auth/otp/resend'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      return {
+        success: false,
+        status: res.status,
+        error: data.error || `HTTP ${res.status}`,
+        retryAfterSeconds: data.retryAfterSeconds
+      };
+    }
+    return data;
+  } catch (err) {
+    return { success: false, error: err.message || 'Network request failed' };
+  }
+}
+
+export async function verifyEmailOtpApi(payload) {
+  try {
+    const res = await fetch(apiUrl('/api/auth/otp/verify-email'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      return {
+        success: false,
+        status: res.status,
+        error: data.error || `HTTP ${res.status}`,
+        expired: Boolean(data.expired),
+        attemptsRemaining: data.attemptsRemaining,
+        maxAttemptsReached: Boolean(data.maxAttemptsReached)
+      };
+    }
+    return data;
+  } catch (err) {
+    return { success: false, error: err.message || 'Network request failed' };
+  }
+}
+
+export async function verifyPhoneOtpApi(payload) {
+  try {
+    const res = await fetch(apiUrl('/api/auth/otp/verify-phone'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      return {
+        success: false,
+        status: res.status,
+        error: data.error || `HTTP ${res.status}`,
+        expired: Boolean(data.expired),
+        attemptsRemaining: data.attemptsRemaining
+      };
+    }
+    return data;
+  } catch (err) {
+    return { success: false, error: err.message || 'Network request failed' };
+  }
+}
+
+export async function fetchAdminRegistrationsApi() {
+  try {
+    const headers = await getAdminHeaders();
+    const res = await fetch('/api/admin/registrations', {
+      method: 'GET',
+      headers,
+      credentials: 'same-origin',
+      cache: 'no-store'
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (err) {
+    console.warn('[api] fetchAdminRegistrationsApi warning:', err);
+    return null;
+  }
+}
+
+export async function adminRegistrationActionApi(payload) {
+  try {
+    const headers = await getAdminHeaders();
+    const res = await fetch('/api/admin/registrations/action', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(payload),
+      credentials: 'same-origin'
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      return { success: false, error: data.error || `HTTP ${res.status}` };
     }
     return data;
   } catch (err) {

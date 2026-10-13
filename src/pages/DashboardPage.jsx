@@ -27,21 +27,26 @@ import {
 export const DashboardPage = ({ setCurrentTab, setSelectedDay }) => {
   const { user, tasks, submissions, currentDay, setSprintDay, manualOverrides } = useApp();
 
-  // Filter submissions by current user
-  const userSubmissions = submissions.filter(s => s.userId === user?.uid);
-  const summary = computeUserSummary(userSubmissions, manualOverrides[user?.uid]);
+  // Filter submissions by current user (matching uid or prn)
+  const normUserPrn = String(user?.prn || '').trim().toUpperCase();
+  const userSubmissions = submissions.filter(
+    s => s.userId === user?.uid || (normUserPrn && String(s.prn || '').trim().toUpperCase() === normUserPrn)
+  );
+  const summary = computeUserSummary(userSubmissions, manualOverrides[user?.uid] ?? manualOverrides[normUserPrn]);
 
   // Compute User Rank across all unique users (Leaderboard tie-breaking logic)
   const allUserMap = {};
   submissions.forEach(sub => {
-    if (!allUserMap[sub.userId]) {
-      allUserMap[sub.userId] = [];
+    const key = String(sub.prn || '').trim().toUpperCase() || sub.userId;
+    if (!key) return;
+    if (!allUserMap[key]) {
+      allUserMap[key] = [];
     }
-    allUserMap[sub.userId].push(sub);
+    allUserMap[key].push(sub);
   });
 
-  const rankedUsers = Object.entries(allUserMap).map(([uid, subs]) => ({
-    uid,
+  const rankedUsers = Object.entries(allUserMap).map(([key, subs]) => ({
+    key,
     summary: computeUserSummary(subs)
   })).sort((a, b) => {
     if (b.summary.totalScore !== a.summary.totalScore) {
@@ -53,7 +58,7 @@ export const DashboardPage = ({ setCurrentTab, setSelectedDay }) => {
     return (a.summary.lastSubmissionTime || Infinity) - (b.summary.lastSubmissionTime || Infinity);
   });
 
-  const userRankIndex = rankedUsers.findIndex(u => u.uid === user?.uid);
+  const userRankIndex = rankedUsers.findIndex(u => u.key === normUserPrn || u.key === user?.uid);
   const userRank = userRankIndex >= 0 ? userRankIndex + 1 : rankedUsers.length + 1;
 
   // Handler to open task page for a specific day
@@ -101,27 +106,39 @@ export const DashboardPage = ({ setCurrentTab, setSelectedDay }) => {
 
   const statusConfig = getStatusBadge(summary.progressStatus);
 
-  // If user is not yet registered, prompt clean onboarding
-  if (!user) {
+  // If user is not yet registered or is unverified/suspended, block dashboard access
+  if (!user || user.accountStatus === 'unverified' || user.suspended) {
+    const isUnverified = user?.accountStatus === 'unverified';
+    const isSuspended = Boolean(user?.suspended || user?.accountStatus === 'suspended');
     return (
       <div className="min-h-screen bg-[#FCF9F2] dark:bg-[#0F1115] transition-colors py-16 px-4 flex items-center justify-center">
         <div className="max-w-md w-full bg-white dark:bg-[#181B20] rounded-3xl p-6 sm:p-8 border border-[#E8DEC8] dark:border-[#2E3440] shadow-sm text-center">
           <div className="w-16 h-16 rounded-2xl bg-[#B3122B]/10 text-[#B3122B] flex items-center justify-center mx-auto mb-4">
-            <Sparkles className="w-8 h-8" />
+            {isSuspended ? <ShieldAlert className="w-8 h-8" /> : <Sparkles className="w-8 h-8" />}
           </div>
           <h2 className="text-xl sm:text-2xl font-black text-[#1A1A1A] dark:text-white">
-            Student Registration Required
+            {isSuspended
+              ? 'Account Suspended'
+              : isUnverified
+                ? 'Email Verification Required'
+                : 'Student Registration Required'}
           </h2>
           <p className="text-xs sm:text-sm text-gray-500 mt-2 mb-6">
-            Welcome to Technova Code Sprint! Please complete your SVIT student registration to unlock your daily 9-day coding challenges and start building.
+            {isSuspended
+              ? 'Your account has been suspended by the event administrator. Please contact the SVIT Technical Skill Development Hub.'
+              : isUnverified
+                ? 'Your account is currently unverified. You must verify the 6-digit OTP sent to your email before accessing the dashboard, submitting programs, or appearing on the leaderboard.'
+                : 'Welcome to Technova Code Sprint! Please complete your verified SVIT student registration to unlock your daily 9-day coding challenges and start building.'}
           </p>
-          <button
-            onClick={() => setCurrentTab('register')}
-            className="w-full py-3.5 px-6 rounded-xl font-bold bg-[#B3122B] text-white hover:bg-[#8B0D20] text-sm flex items-center justify-center gap-2 shadow-md shadow-[#B3122B]/20 transition-all cursor-pointer"
-          >
-            <span>Register as Student</span>
-            <ArrowRight className="w-4 h-4" />
-          </button>
+          {!isSuspended && (
+            <button
+              onClick={() => setCurrentTab('register')}
+              className="w-full py-3.5 px-6 rounded-xl font-bold bg-[#B3122B] text-white hover:bg-[#8B0D20] text-sm flex items-center justify-center gap-2 shadow-md shadow-[#B3122B]/20 transition-all cursor-pointer"
+            >
+              <span>{isUnverified ? 'Verify Email OTP Now' : 'Register & Verify Student Account'}</span>
+              <ArrowRight className="w-4 h-4" />
+            </button>
+          )}
         </div>
       </div>
     );
@@ -133,17 +150,51 @@ export const DashboardPage = ({ setCurrentTab, setSelectedDay }) => {
   return (
     <div className="min-h-screen bg-[#FCF9F2] dark:bg-[#0F1115] transition-colors py-8 px-4 sm:px-6 lg:px-8 pb-24">
       <div className="max-w-7xl mx-auto">
-        
+
+        {/* One-Time Prompt for Existing Legacy Accounts without Verified Email/Phone (Requirement 8) */}
+        {user?.needsLegacyVerification && (
+          <div
+            data-testid="dashboard-legacy-verify-prompt"
+            className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 sm:p-5 mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+          >
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+              <div>
+                <h3 className="text-sm font-extrabold text-amber-950 dark:text-amber-200">
+                  Verify Your Email and Phone Number (One-Time Update)
+                </h3>
+                <p className="text-xs text-amber-900/90 dark:text-amber-200/80 mt-0.5">
+                  Your existing progress and leaderboard points for Roll No <strong>{user.prn}</strong> are safely preserved! Please complete a quick one-time verification of your email and +91 mobile number for official SVIT certificate issuance.
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => setCurrentTab('register')}
+              data-testid="dashboard-verify-now-btn"
+              className="px-4 py-2.5 rounded-xl bg-[#B3122B] hover:bg-[#8B0D20] text-white text-xs font-bold shrink-0 flex items-center justify-center gap-1.5 cursor-pointer shadow-xs"
+            >
+              <span>Verify Email & Phone</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+
         {/* Top Header & Greeting */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
           <div>
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-xs font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-md bg-[#B3122B]/10 dark:bg-[#B3122B]/20 text-[#B3122B] dark:text-[#ff8a9e]">
-                {user?.language || user?.track || "Python"} Track • {user?.year || "SE"}
+                {user?.language || user?.track || "Python"} Track • {user?.year || "SE"} {user?.division ? `• Div ${user.division}` : ''}
               </span>
               <span className="text-xs font-mono text-gray-500">
                 Roll No: {user?.prn || ""}
               </span>
+              {user?.emailVerified && (
+                <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-md">
+                  <CheckCircle2 className="w-3 h-3" />
+                  Verified Student
+                </span>
+              )}
             </div>
             <h1 className="text-2xl sm:text-3xl font-extrabold text-[#1A1A1A] dark:text-white mt-1">
               Welcome, {user?.name}! 👋

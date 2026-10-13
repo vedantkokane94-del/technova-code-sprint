@@ -800,6 +800,34 @@ export const TaskPage = ({ dayNumber, setCurrentTab }) => {
     }
   };
 
+  if (!user || user.accountStatus === 'unverified' || user.suspended) {
+    return (
+      <div className="min-h-screen bg-[#FCF9F2] dark:bg-[#0F1115] py-16 px-4 flex items-center justify-center">
+        <div className="max-w-md w-full bg-white dark:bg-[#181B20] p-8 rounded-3xl border border-[#E8DEC8] dark:border-[#2E3440] text-center shadow-sm">
+          <div className="w-14 h-14 rounded-2xl bg-[#B3122B]/10 text-[#B3122B] flex items-center justify-center mx-auto mb-4">
+            <Lock className="w-7 h-7" />
+          </div>
+          <h2 className="text-xl font-extrabold text-[#1A1A1A] dark:text-white">
+            {user?.suspended ? 'Account Suspended' : 'Verified Student Account Required'}
+          </h2>
+          <p className="text-xs text-gray-500 mt-2 mb-6">
+            {user?.suspended
+              ? 'Your account has been suspended by the administrator.'
+              : 'You must complete student registration and verify your 6-digit email OTP before accessing daily tasks or submitting programs.'}
+          </p>
+          {!user?.suspended && (
+            <button
+              onClick={() => setCurrentTab('register')}
+              className="w-full py-3 px-6 rounded-xl font-bold bg-[#B3122B] text-white hover:bg-[#8B0D20] text-sm cursor-pointer"
+            >
+              Complete Registration & Verify OTP →
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   // Section 2: Locked Day & Pre-Launch Countdown Screen
   // Before unlock time, students can give consent, but task questions/hints are not shown.
   // When 8:00 AM IST arrives, page unlocks automatically without manual refresh.

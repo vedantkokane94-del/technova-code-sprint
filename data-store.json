@@ -1,22 +1,23 @@
 {
   "students": [
     {
-      "uid": "svit-stu-33",
+      "uid": "svit-user-phone-33",
       "name": "Vedant Kokane",
-      "email": "vedantkokane94@gmail.com",
+      "email": "vedant.kokane33@svit.ac.in",
       "prn": "33",
       "year": "Second Year (SE)",
       "branch": "Computer Engineering",
       "language": "Python",
       "track": "Python",
       "role": "student",
+      "sessionToken": "TNV-STU.eyJ1aWQiOiJzdml0LXVzZXItcGhvbmUtMzMiLCJwcm4iOiIzMyIsIm5hbWUiOiJWZWRhbnQgS29rYW5lIiwiZW1haWwiOiJ2ZWRhbnQua29rYW5lMzNAc3ZpdC5hYy5pbiIsInllYXIiOiJTZWNvbmQgWWVhciAoU0UpIiwiYnJhbmNoIjoiQ29tcHV0ZXIgRW5naW5lZXJpbmciLCJsYW5ndWFnZSI6IlB5dGhvbiIsInRyYWNrIjoiUHl0aG9uIiwicm9sZSI6InN0dWRlbnQiLCJpYXQiOjE3OTE4NTY5Mjc2NDF9.RAm0-q7_JOobIJG1NppPCeAlM4xcETCmEPyEpsL53E8",
       "updatedAt": "2026-10-13T02:02:12.879Z"
     }
   ],
   "submissions": [
     {
-      "id": "sub-svit-stu-33-day-1",
-      "userId": "svit-stu-33",
+      "id": "sub-svit-user-phone-33-day-1",
+      "userId": "svit-user-phone-33",
       "studentName": "Vedant Kokane",
       "prn": "33",
       "day": 1,
@@ -40,6 +41,15 @@
   "emailLogs": [],
   "resultsPublished": false,
   "allowExitedStudentsForCert": false,
+  "pendingVerifications": {},
+  "registrationRateLimits": {},
+  "registrationSettings": {
+    "allowlistEnabled": false,
+    "allowedDomains": [
+      "svit.ac.in"
+    ],
+    "phoneVerificationRequired": false
+  },
   "certificateAudit": {
     "generationCount": 0,
     "downloadCount": 0,
