@@ -25,7 +25,9 @@ import {
   mergeStores,
   syncFromSupabaseIfConfigured,
   pushToSupabaseIfConfigured,
-  isSupabaseConfigured
+  isSupabaseConfigured,
+  deleteStudentFromDb,
+  clearAllStudentsFromDb
 } from './dbAdapter.js';
 
 // Ensure server-side env variables from .env are available even if not preloaded by bundler
@@ -607,6 +609,23 @@ export function createApiMiddleware() {
       res.end(JSON.stringify(data));
     };
 
+    // Client error logging endpoint (captures ErrorBoundary stack traces in server logs)
+    if (url === '/api/logs/client-error' && req.method === 'POST') {
+      console.error('====================================================');
+      console.error('[CLIENT RUNTIME ERROR REPORTED TO SERVER]:');
+      console.error('Message:', body.message || 'Unknown error');
+      console.error('URL:', body.url || 'Unknown URL');
+      console.error('IP:', clientIp, '| User-Agent:', userAgent);
+      if (body.stack) {
+        console.error('Client Stack:\n' + body.stack);
+      }
+      if (body.componentStack) {
+        console.error('Component Stack:\n' + body.componentStack);
+      }
+      console.error('====================================================');
+      return sendJson(200, { success: true, logged: true });
+    }
+
     // -------------------------------------------------------------
     // 1. UNIFIED ADMIN DEVICE LOCK & HARDWARE CONCEALMENT ROUTER
     // -------------------------------------------------------------
@@ -1146,6 +1165,71 @@ export function createApiMiddleware() {
           });
         }
 
+        // Bulk Operation: Clear All Students
+        if (action === 'clear_all') {
+          const phrase = String(body.confirmationPhrase || '').trim();
+          if (phrase !== 'CLEAR ALL') {
+            return sendJson(400, {
+              error: 'Confirmation phrase mismatch. You must type "CLEAR ALL" exactly to wipe all student data.'
+            });
+          }
+
+          const studentCount = (store.students || []).length;
+          const subCount = (store.submissions || []).length;
+          const certCount = (store.certificates || []).length;
+
+          // Invalidate all student sessions & tokens on the server
+          store.deletedPrns = store.deletedPrns || [];
+          store.invalidatedTokens = store.invalidatedTokens || [];
+          for (const s of (store.students || [])) {
+            const p = String(s.prn || '').trim().toUpperCase();
+            if (p && !store.deletedPrns.includes(p)) store.deletedPrns.push(p);
+            if (s.sessionToken && !store.invalidatedTokens.includes(s.sessionToken)) {
+              store.invalidatedTokens.push(s.sessionToken);
+            }
+          }
+          for (const sess of (store.activeTestSessions || [])) {
+            if (sess.token && !store.invalidatedTokens.includes(sess.token)) {
+              store.invalidatedTokens.push(sess.token);
+            }
+          }
+
+          // Cascade delete in-memory/JSON store
+          store.students = [];
+          store.submissions = [];
+          store.certificates = [];
+          store.pendingVerifications = {};
+          store.userConsentsMap = {};
+          store.manualOverrides = {};
+          store.proctoringFlags = [];
+          store.studentWhitelists = [];
+          store.activeTestSessions = (store.activeTestSessions || []).filter(s => s.role === 'admin');
+
+          // Minimal audit log (admin, timestamp, action, count) without personal data
+          store.adminAuditLogs = store.adminAuditLogs || [];
+          store.adminAuditLogs.unshift({
+            id: `audit-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            admin: 'admin',
+            action: 'clear_all_students',
+            count: studentCount,
+            submissionsDeleted: subCount,
+            certificatesDeleted: certCount,
+            timestamp: new Date().toISOString(),
+            ip: clientIp
+          });
+
+          // Cascade delete Supabase tables if configured
+          await clearAllStudentsFromDb();
+          saveStore(store);
+
+          return sendJson(200, {
+            success: true,
+            message: `Successfully cleared all ${studentCount} student accounts, ${subCount} submissions, and ${certCount} certificates. All sessions invalidated everywhere.`,
+            count: studentCount,
+            leaderboard: []
+          });
+        }
+
         const targetPrn = String(body.prn || '').trim().toUpperCase();
         const targetUid = String(body.uid || body.userId || '').trim();
         const idx = store.students.findIndex(
@@ -1220,16 +1304,72 @@ export function createApiMiddleware() {
         if (action === 'delete') {
           const removed = store.students.splice(idx, 1)[0];
           const removedPrn = String(removed.prn || '').trim().toUpperCase();
+          const removedUid = String(removed.uid || '').trim();
+
+          // 1. Invalidate session token & blacklist PRN immediately on server
+          store.deletedPrns = store.deletedPrns || [];
+          if (removedPrn && !store.deletedPrns.includes(removedPrn)) {
+            store.deletedPrns.push(removedPrn);
+          }
+          store.invalidatedTokens = store.invalidatedTokens || [];
+          if (removed.sessionToken && !store.invalidatedTokens.includes(removed.sessionToken)) {
+            store.invalidatedTokens.push(removed.sessionToken);
+          }
+          store.activeTestSessions = (store.activeTestSessions || []).filter(
+            s => String(s.prn || '').trim().toUpperCase() !== removedPrn && s.userId !== removedUid
+          );
+
+          // 2. Cascade delete submissions, certificates, verifications, consents, overrides, flags
           if (store.pendingVerifications && removedPrn) {
             delete store.pendingVerifications[removedPrn];
           }
+          if (store.userConsentsMap) {
+            delete store.userConsentsMap[removedUid];
+            delete store.userConsentsMap[removedPrn];
+          }
+          if (store.manualOverrides) {
+            delete store.manualOverrides[removedUid];
+            delete store.manualOverrides[removedPrn];
+          }
+          const subCountBefore = (store.submissions || []).length;
           store.submissions = (store.submissions || []).filter(
-            sub => String(sub.prn || '').trim().toUpperCase() !== removedPrn && sub.userId !== removed.uid
+            sub => String(sub.prn || '').trim().toUpperCase() !== removedPrn && sub.userId !== removedUid
           );
+          const subsDeleted = subCountBefore - store.submissions.length;
+
+          const certCountBefore = (store.certificates || []).length;
+          store.certificates = (store.certificates || []).filter(
+            c => String(c.prn || '').trim().toUpperCase() !== removedPrn && c.userId !== removedUid
+          );
+          const certsDeleted = certCountBefore - store.certificates.length;
+
+          store.proctoringFlags = (store.proctoringFlags || []).filter(
+            f => String(f.prn || '').trim().toUpperCase() !== removedPrn && f.userId !== removedUid
+          );
+          store.studentWhitelists = (store.studentWhitelists || []).filter(
+            w => String(w.prn || '').trim().toUpperCase() !== removedPrn && w.userId !== removedUid
+          );
+
+          // 3. Minimal audit log without personal data
+          store.adminAuditLogs = store.adminAuditLogs || [];
+          store.adminAuditLogs.unshift({
+            id: `audit-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            admin: 'admin',
+            action: 'delete_student',
+            count: 1,
+            submissionsDeleted: subsDeleted,
+            certificatesDeleted: certsDeleted,
+            timestamp: new Date().toISOString(),
+            ip: clientIp
+          });
+
+          // 4. Cascade delete Supabase tables if configured
+          await deleteStudentFromDb(removedPrn, removedUid);
           saveStore(store);
+
           return sendJson(200, {
             success: true,
-            message: `Deleted fake/unwanted account ${removed.name} (${removed.prn}).`,
+            message: `Permanently deleted student ${removed.name} (${removedPrn}) and all associated ${subsDeleted} submission(s) and ${certsDeleted} certificate(s). Session invalidated everywhere.`,
             deletedPrn: removedPrn,
             leaderboard: computeSharedLeaderboard(store)
           });
@@ -2024,14 +2164,28 @@ export function createApiMiddleware() {
       const token = bearerToken || req.headers['x-student-session-token'] || req.headers['x-student-session'] || body.sessionToken || '';
       if (!token) return null;
 
+      // 0. Check if token or student was invalidated by admin deletion
+      if (store.invalidatedTokens && store.invalidatedTokens.includes(token)) {
+        return null;
+      }
+
       // 1. Check store.students by sessionToken
       const byToken = (store.students || []).find(s => s.sessionToken && s.sessionToken === token);
-      if (byToken) return byToken;
+      if (byToken) {
+        const p = String(byToken.prn || '').trim().toUpperCase();
+        if (store.deletedPrns && store.deletedPrns.includes(p)) return null;
+        return byToken;
+      }
 
       // 2. Verify signed stateless student token and hydrate/match student in store
       const decoded = verifyStudentSessionToken(token);
       if (decoded && decoded.prn) {
         const normPrn = String(decoded.prn).trim().toUpperCase();
+        // NEVER auto-restore a student that the admin deliberately deleted!
+        if (store.deletedPrns && store.deletedPrns.includes(normPrn)) {
+          return null;
+        }
+
         const existingIdx = (store.students || []).findIndex(
           s => String(s.prn || '').trim().toUpperCase() === normPrn || s.uid === decoded.uid
         );
@@ -2039,7 +2193,7 @@ export function createApiMiddleware() {
           store.students[existingIdx].sessionToken = token;
           return store.students[existingIdx];
         }
-        // Re-register student into store if missing after serverless cold start
+        // Re-register student into store if missing after serverless cold start (and NOT deleted)
         const restored = {
           uid: decoded.uid || `svit-stu-${normPrn}`,
           prn: normPrn,
@@ -2063,11 +2217,17 @@ export function createApiMiddleware() {
 
     // 5.1 Fetch Shared Application State & Current Student Profile: GET /api/state
     if (url === '/api/state' && (req.method === 'GET' || req.method === 'POST')) {
+      const authHeader = req.headers.authorization || '';
+      const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+      const token = bearerToken || req.headers['x-student-session-token'] || req.headers['x-student-session'] || body.sessionToken || '';
+
       const activeStudent = resolveStudentFromToken();
+      const sessionInvalidated = Boolean(token && !activeStudent);
       const eligibleStudent = activeStudent && isStudentEligibleForActiveAccess(activeStudent) ? activeStudent : null;
       const leaderboard = computeSharedLeaderboard(store);
       return sendJson(200, {
         user: eligibleStudent ? decorateStudentForClient(eligibleStudent) : null,
+        sessionInvalidated,
         students: (store.students || [])
           .filter(s => isStudentEligibleForActiveAccess(s))
           .map(s => decorateStudentForClient(s)),

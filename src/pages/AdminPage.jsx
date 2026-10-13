@@ -47,7 +47,8 @@ import {
   Laptop,
   Server,
   Sliders,
-  LogOut
+  LogOut,
+  Code
 } from 'lucide-react';
 import { Github } from '../components/GithubIcon';
 import { CertificateView } from '../components/CertificateView';
@@ -55,6 +56,18 @@ import { AdminRegistrationsPanel } from '../components/AdminRegistrationsPanel';
 import { SVITHubLogo, DurgaMataSketch } from '../components/BrandLogo';
 import { SPRINT_SCHEDULE, SPRINT_START_DATE, SPRINT_END_DATE, SPRINT_ISSUE_DATE, getSprintDaySchedule } from '../data/tasksSeed';
 import { downloadCertificatePdf, DEFAULT_TEMPLATE_CONFIG } from '../utils/certificateGenerator';
+import {
+  safeString,
+  safeTrim,
+  safeLowerCase,
+  safeUpperCase,
+  safeReplace,
+  safeSplit,
+  safeInitials,
+  safeGithubRepo,
+  sanitizeStudent,
+  sanitizeSubmission
+} from '../utils/safeString';
 import { 
   checkAdminDeviceStatus, 
   registerAdminDevice, 
@@ -126,7 +139,9 @@ export const AdminPage = ({ setCurrentTab }) => {
     resultsPublished,
     toggleResultsPublished,
     allowExitedStudentsForCert,
-    toggleAllowExitedForCert
+    toggleAllowExitedForCert,
+    lastSyncTime,
+    isLiveConnected
   } = useApp();
 
   const [activeTab, setActiveTab] = useState('registrations'); // 'registrations' | 'submissions' | 'proctoring' | 'certificates' | 'verification' | 'tasks' | 'template' | 'testmode' | 'security' | 'examsettings'
@@ -432,9 +447,11 @@ export const AdminPage = ({ setCurrentTab }) => {
   // Filter submissions
   const filteredSubmissions = submissionsWithFlags.filter(sub => {
     const matchesDay = filterDay === 'All' || sub.day === parseInt(filterDay, 10);
-    const matchesSearch = sub.studentName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          sub.prn.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          sub.githubRepo.toLowerCase().includes(searchQuery.toLowerCase());
+    const q = safeLowerCase(searchQuery);
+    const matchesSearch = !q ||
+                          safeLowerCase(sub.studentName).includes(q) ||
+                          safeLowerCase(sub.prn).includes(q) ||
+                          safeLowerCase(sub.githubRepo).includes(q);
     return matchesDay && matchesSearch;
   });
 
@@ -462,13 +479,13 @@ export const AdminPage = ({ setCurrentTab }) => {
 
     const rows = submissionsWithFlags.map(s => [
       s.id,
-      `"${s.studentName.replace(/"/g, '""')}"`,
-      s.prn,
+      `"${safeReplace(s.studentName, /"/g, '""')}"`,
+      safeString(s.prn),
       s.day,
       s.track,
       s.variant,
-      `"${s.githubRepo}"`,
-      `"${(s.solutionNote || '').replace(/"/g, '""')}"`,
+      `"${safeString(s.githubRepo)}"`,
+      `"${safeReplace(s.solutionNote, /"/g, '""')}"`,
       s.tabSwitches || 0,
       s.commitCount || 0,
       s.bigCommitNearDeadline ? "YES" : "NO",
@@ -476,7 +493,7 @@ export const AdminPage = ({ setCurrentTab }) => {
       s.points || 0,
       s.vivaRequired ? "YES" : "NO",
       s.failedViva ? "YES" : "NO",
-      `"${(s.vivaNotes || '').replace(/"/g, '""')}"`,
+      `"${safeReplace(s.vivaNotes, /"/g, '""')}"`,
       s.submittedAt
     ]);
 
@@ -517,9 +534,9 @@ export const AdminPage = ({ setCurrentTab }) => {
       const total = s.eligibility?.summary?.totalScore ?? 0;
       const isPass = total >= 50 && !s.eligibility?.hasFailedViva && !s.eligibility?.hasUnresolvedFlag;
       return [
-        `"${s.name.replace(/"/g, '""')}"`,
-        s.prn,
-        `"${s.email || `${s.prn.toLowerCase()}@svit.ac.in`}"`,
+        `"${safeReplace(s.name, /"/g, '""')}"`,
+        safeString(s.prn),
+        `"${s.email || `${safeLowerCase(s.prn)}@svit.ac.in`}"`,
         `"${s.language || s.track || 'Python'}"`,
         dayScores[1] ?? 0,
         dayScores[2] ?? 0,
@@ -619,12 +636,12 @@ export const AdminPage = ({ setCurrentTab }) => {
       if (reqs.length === 0) return false;
     }
 
-    if (certSearch.trim()) {
-      const q = certSearch.toLowerCase();
-      const matchName = s.name.toLowerCase().includes(q);
-      const matchPrn = s.prn.toLowerCase().includes(q);
-      const matchTrack = (s.track || '').toLowerCase().includes(q);
-      const matchEmail = (s.email || '').toLowerCase().includes(q);
+    if (safeTrim(certSearch)) {
+      const q = safeLowerCase(certSearch);
+      const matchName = safeLowerCase(s.name).includes(q);
+      const matchPrn = safeLowerCase(s.prn).includes(q);
+      const matchTrack = safeLowerCase(s.track).includes(q);
+      const matchEmail = safeLowerCase(s.email).includes(q);
       return matchName || matchPrn || matchTrack || matchEmail;
     }
     return true;
@@ -726,7 +743,7 @@ export const AdminPage = ({ setCurrentTab }) => {
 
         const student = batch[i];
         const cert = issueCertificate(student);
-        const recipientEmail = (student.email || `${student.prn.toLowerCase()}@svit.ac.in`).trim();
+        const recipientEmail = (student.email || `${safeLowerCase(student.prn)}@svit.ac.in`).trim();
         const score = student.eligibility?.totalScore?.toFixed(1) || '50.0';
         const language = student.language || student.track || 'Python';
         const currentIndex = b * BATCH_SIZE + i + 1;
@@ -738,7 +755,7 @@ export const AdminPage = ({ setCurrentTab }) => {
           totalBatches,
           isPaused: false,
           pauseRemaining: 0,
-          message: `Sending certificate to ${student.name} (${currentIndex}/${targets.length})...`
+          message: `Sending certificate to ${student.name || 'Student'} (${currentIndex}/${targets.length})...`
         });
 
         // Email validation (Section 9.7)
@@ -752,15 +769,15 @@ export const AdminPage = ({ setCurrentTab }) => {
           addEmailLog({
             id: `log-${Date.now()}-${i}`,
             recipientEmail,
-            studentName: student.name,
-            prn: student.prn,
+            studentName: student.name || 'Student',
+            prn: safeString(student.prn),
             certificateId: cert.certificateId,
             sender: "technicalteamsvit@gmail.com",
             status: "failed",
             error: "invalid address: Malformed recipient address",
             attempts: 1,
             timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            subject: `Your Technova Code Sprint Certificate - ${student.name}`
+            subject: `Your Technova Code Sprint Certificate - ${student.name || 'Student'}`
           });
           failedBatchCount++;
           continue;
@@ -775,7 +792,7 @@ export const AdminPage = ({ setCurrentTab }) => {
           attempt++;
 
           // Classified error simulation & verification
-          const isSimulatedFail = student.name.toLowerCase().includes('fail') || recipientEmail.includes('error');
+          const isSimulatedFail = safeLowerCase(student.name).includes('fail') || recipientEmail.includes('error');
           const isMailboxFull = recipientEmail.includes('mailboxfull');
           const isRateLimited = recipientEmail.includes('ratelimit');
           const isAuthProblem = recipientEmail.includes('autherror');
@@ -798,7 +815,7 @@ export const AdminPage = ({ setCurrentTab }) => {
             if (attempt < 3) {
               setSendProgress(prev => ({
                 ...prev,
-                message: `Attempt ${attempt} failed for ${student.name} (${lastError.split(':')[0]}). Retrying (${attempt + 1}/3)...`
+                message: `Attempt ${attempt} failed for ${student.name || 'Student'} (${safeSplit(lastError, ':')[0] || 'Error'}). Retrying (${attempt + 1}/3)...`
               }));
               await new Promise(r => setTimeout(r, 1200)); // wait before retry
             }
@@ -810,7 +827,7 @@ export const AdminPage = ({ setCurrentTab }) => {
         if (batchCancelRef.current && stoppedEarlyReason) break;
 
         const timestampStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        const messageId = `<svit-${Date.now()}-${cert.certificateId.toLowerCase()}@gmail.com>`;
+        const messageId = `<svit-${Date.now()}-${safeLowerCase(cert.certificateId || 'cert')}@gmail.com>`;
 
         if (delivered) {
           successfullySentCount++;
@@ -1296,9 +1313,31 @@ export const AdminPage = ({ setCurrentTab }) => {
               <ShieldCheck className="w-4 h-4" />
               <span>SVIT Faculty & Mentor Admin Dashboard</span>
             </div>
-            <h1 className="text-3xl font-extrabold text-[#1A1A1A] dark:text-white">
-              Code Sprint Command Center
-            </h1>
+            <div className="flex items-center gap-3 flex-wrap">
+              <h1 className="text-3xl font-extrabold text-[#1A1A1A] dark:text-white">
+                Code Sprint Command Center
+              </h1>
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-2xs">
+                <span className="relative flex h-2 w-2">
+                  <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${isLiveConnected ? 'bg-emerald-400' : 'bg-amber-400'}`}></span>
+                  <span className={`relative inline-flex rounded-full h-2 w-2 ${isLiveConnected ? 'bg-emerald-500' : 'bg-amber-500'}`}></span>
+                </span>
+                <span className="text-[11px] font-bold text-gray-700 dark:text-gray-200">
+                  {isLiveConnected ? 'LIVE 5s SYNC' : 'RECONNECTING...'}
+                </span>
+                <span className="text-[10px] text-gray-400 dark:text-gray-500 font-mono">
+                  {lastSyncTime ? new Date(lastSyncTime).toLocaleTimeString() : 'syncing'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => refreshSharedState && refreshSharedState()}
+                  title="Force refresh data from database"
+                  className="p-0.5 hover:text-[#B3122B] text-gray-400 transition-colors cursor-pointer"
+                >
+                  <RefreshCw className="w-3 h-3" />
+                </button>
+              </div>
+            </div>
             <p className="text-sm text-[#6b6375] dark:text-[#94a3b8] mt-1">
               Review repository commit histories, analyze text similarities, conduct 2-min vivas, and export records.
             </p>
@@ -1687,25 +1726,34 @@ export const AdminPage = ({ setCurrentTab }) => {
 
                         {/* Repo & Commit Timeline */}
                         <td className="py-3 px-4 max-w-xs">
-                          <a 
-                            href={sub.githubRepo} 
-                            target="_blank" 
-                            rel="noopener noreferrer"
-                            className="text-[#B3122B] dark:text-[#ff8a9e] font-semibold hover:underline flex items-center gap-1 truncate"
-                          >
-                            <Github className="w-3.5 h-3.5 shrink-0" />
-                            <span className="truncate">{sub.githubRepo.replace('https://github.com/', '')}</span>
-                          </a>
+                          {sub.githubRepo ? (
+                            <a 
+                              href={sub.githubRepo} 
+                              target="_blank" 
+                              rel="noopener noreferrer"
+                              className="text-[#B3122B] dark:text-[#ff8a9e] font-semibold hover:underline flex items-center gap-1 truncate"
+                            >
+                              <Github className="w-3.5 h-3.5 shrink-0" />
+                              <span className="truncate">{safeGithubRepo(sub.githubRepo)}</span>
+                            </a>
+                          ) : (
+                            <div className="text-xs text-gray-500 italic flex items-center gap-1">
+                              <Code className="w-3.5 h-3.5 text-[#B3122B]" />
+                              <span>Platform IDE / Quiz</span>
+                            </div>
+                          )}
                           
                           <div className="text-[11px] text-gray-500 mt-1 flex items-center gap-2">
                             <span>{sub.commitCount || 1} commits</span>
                             <span>•</span>
-                            <span className="font-mono">{sub.firstCommitTime} → {sub.lastCommitTime}</span>
+                            <span className="font-mono">{sub.firstCommitTime || '10:00 AM'} → {sub.lastCommitTime || '11:00 AM'}</span>
                           </div>
 
-                          <div className="text-[11px] text-gray-500 line-clamp-1 italic mt-0.5">
-                            "{sub.solutionNote}"
-                          </div>
+                          {sub.solutionNote ? (
+                            <div className="text-[11px] text-gray-500 line-clamp-1 italic mt-0.5">
+                              "{sub.solutionNote}"
+                            </div>
+                          ) : null}
                         </td>
 
                         {/* Integrity Signals */}
@@ -1795,7 +1843,7 @@ export const AdminPage = ({ setCurrentTab }) => {
                                   name: sub.studentName,
                                   prn: sub.prn,
                                   track: sub.track,
-                                  email: sub.email || `${sub.prn?.toLowerCase()}@svit.ac.in`
+                                  email: sub.email || `${safeLowerCase(sub.prn)}@svit.ac.in`
                                 };
                                 setSelectedStudentForTrackWindow(studentObj);
                               }}
@@ -2487,11 +2535,11 @@ export const AdminPage = ({ setCurrentTab }) => {
                             <td className="py-3 px-4">
                               <div className="flex items-center gap-2.5">
                                 <div className="w-8 h-8 rounded-full bg-[#B3122B]/10 text-[#B3122B] font-black flex items-center justify-center shrink-0 text-xs">
-                                  {stud.name.charAt(0)}
+                                  {safeInitials(stud.name).slice(0, 1)}
                                 </div>
                                 <div>
                                   <div className="font-bold text-[#1A1A1A] dark:text-white flex items-center gap-1.5 flex-wrap">
-                                    <span>{stud.name}</span>
+                                    <span>{stud.name || 'Student'}</span>
                                     <span className="text-[10px] px-1.5 py-0.2 rounded bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 font-semibold">
                                       {stud.track || 'Web'}
                                     </span>
@@ -2503,7 +2551,7 @@ export const AdminPage = ({ setCurrentTab }) => {
                                     )}
                                   </div>
                                   <div className="text-[11px] text-gray-500 font-mono">
-                                    Roll No: {stud.prn} • <span className="text-gray-400">{stud.email || `${stud.prn.toLowerCase()}@svit.ac.in`}</span>
+                                    Roll No: {stud.prn} • <span className="text-gray-400">{stud.email || `${safeLowerCase(stud.prn)}@svit.ac.in`}</span>
                                   </div>
                                 </div>
                               </div>
@@ -3797,15 +3845,15 @@ export const AdminPage = ({ setCurrentTab }) => {
 
               {(() => {
                 const filteredAuditLogs = auditLogs.filter(log => {
-                  if (!auditLogSearch.trim()) return true;
-                  const q = auditLogSearch.toLowerCase();
+                  if (!safeTrim(auditLogSearch)) return true;
+                  const q = safeLowerCase(auditLogSearch);
                   return (
-                    (log.ip && log.ip.toLowerCase().includes(q)) ||
-                    (log.action && log.action.toLowerCase().includes(q)) ||
-                    (log.reason && log.reason.toLowerCase().includes(q)) ||
-                    (log.details && log.details.toLowerCase().includes(q)) ||
-                    (log.userAgent && log.userAgent.toLowerCase().includes(q)) ||
-                    (log.deviceName && log.deviceName.toLowerCase().includes(q))
+                    safeLowerCase(log.ip).includes(q) ||
+                    safeLowerCase(log.action).includes(q) ||
+                    safeLowerCase(log.reason).includes(q) ||
+                    safeLowerCase(log.details).includes(q) ||
+                    safeLowerCase(log.userAgent).includes(q) ||
+                    safeLowerCase(log.deviceName).includes(q)
                   );
                 });
 
@@ -4685,15 +4733,15 @@ export const AdminPage = ({ setCurrentTab }) => {
         {previewEmailStudent && (() => {
           const student = previewEmailStudent;
           const cert = student.cert || issueCertificate(student);
-          const recipientEmail = student.email || `${student.prn.toLowerCase()}@svit.ac.in`;
+          const recipientEmail = student.email || `${safeLowerCase(student.prn)}@svit.ac.in`;
           const score = student.eligibility?.totalScore?.toFixed(1) || '50.0';
           const language = student.language || student.track || 'Python';
           const certId = cert.certificateId || 'TNV-CS-2026-0001-K7Q2';
           const verificationUrl = `${window.location.origin}/verify/${certId}`;
           const myCertificateUrl = `${window.location.origin}/certificate`;
-          const attachmentFileName = `Technova_Code_Sprint_Certificate_${student.name.replace(/\s+/g, '_')}.pdf`;
+          const attachmentFileName = `Technova_Code_Sprint_Certificate_${safeReplace(student.name, /\s+/g, '_') || 'Student'}.pdf`;
 
-          const plainTextBody = `Dear ${student.name},
+          const plainTextBody = `Dear ${student.name || 'Student'},
 
 Congratulations! You have successfully completed the Technova Code Sprint: 9 Days to Build (14 to 22 October 2026), organised by the Technical Skill Development Hub, SVIT Nashik.
 
@@ -5088,7 +5136,7 @@ This is an automated email. For queries, reply to this email.`;
                       </span>
                     </div>
                     <p className="text-xs text-gray-500">
-                      {student.branch || 'Computer Engineering'} • {student.email || `${student.prn?.toLowerCase()}@svit.ac.in`}
+                      {student.branch || 'Computer Engineering'} • {student.email || `${safeLowerCase(student.prn)}@svit.ac.in`}
                     </p>
                   </div>
 
@@ -5210,7 +5258,7 @@ This is an automated email. For queries, reply to this email.`;
                                         className="text-[#B3122B] dark:text-[#ff8a9e] font-mono hover:underline flex items-center gap-1"
                                       >
                                         <Code className="w-3 h-3" />
-                                        <span>Repo: {sub.githubRepo.replace('https://github.com/', '')}</span>
+                                        <span>Repo: {safeGithubRepo(sub.githubRepo)}</span>
                                         <ExternalLink className="w-2.5 h-2.5" />
                                       </a>
                                     )}

@@ -23,6 +23,13 @@ import {
   submitTaskSolutionApi,
   syncLocalBrowserDataApi
 } from '../services/api';
+import {
+  sanitizeStudent,
+  sanitizeSubmission,
+  safeString,
+  safeTrim,
+  safeLowerCase
+} from '../utils/safeString';
 
 const AppContext = createContext();
 
@@ -86,16 +93,38 @@ export const AppProvider = ({ children }) => {
   const [submissions, setSubmissions] = useState([]);
 
   const saveSubmissions = (newSubs) => {
-    setSubmissions(newSubs);
-    syncLocalBrowserDataApi({ submissions: newSubs }).catch(() => {});
+    if (!Array.isArray(newSubs)) return;
+    const validated = [];
+    for (const sub of newSubs) {
+      if (!sub) continue;
+      const sanitized = sanitizeSubmission(sub);
+      if (!sanitized.prn || !sanitized.day) {
+        console.warn('[Validation] Blocked saving submission missing required fields (prn/day):', sub);
+        continue;
+      }
+      validated.push(sanitized);
+    }
+    setSubmissions(validated);
+    syncLocalBrowserDataApi({ submissions: validated }).catch(() => {});
   };
 
   // Registered Students State (single source of truth: shared database)
   const [students, setStudents] = useState([]);
 
   const saveStudents = (newStudents) => {
-    setStudents(newStudents);
-    syncLocalBrowserDataApi({ students: newStudents }).catch(() => {});
+    if (!Array.isArray(newStudents)) return;
+    const validated = [];
+    for (const st of newStudents) {
+      if (!st) continue;
+      const sanitized = sanitizeStudent(st);
+      if (!sanitized.name || !sanitized.prn || !sanitized.track) {
+        console.warn('[Validation] Blocked saving student missing required fields (name/prn/track):', st);
+        continue;
+      }
+      validated.push(sanitized);
+    }
+    setStudents(validated);
+    syncLocalBrowserDataApi({ students: validated }).catch(() => {});
   };
 
   // Certificates State (single source of truth: shared database)
@@ -424,7 +453,7 @@ export const AppProvider = ({ children }) => {
           uid: sub.userId,
           name: sub.studentName,
           prn: sub.prn,
-          email: sub.email || `${sub.prn?.toLowerCase()}@svit.ac.in`,
+          email: sub.email || `${safeLowerCase(sub.prn)}@svit.ac.in`,
           language: sub.language || sub.track || 'Python',
           track: sub.track || sub.language || 'Python',
           role: 'student'
@@ -517,7 +546,7 @@ export const AppProvider = ({ children }) => {
       userId: student.uid,
       studentName: student.name,
       prn: student.prn,
-      email: student.email || `${student.prn?.toLowerCase()}@svit.ac.in`,
+      email: student.email || `${safeLowerCase(student.prn)}@svit.ac.in`,
       language: student.language || student.track || 'Python',
       track: student.language || student.track || 'Python',
       score: summary.totalScore,
@@ -715,6 +744,8 @@ export const AppProvider = ({ children }) => {
   // Server-Verified Administrator Session State
   const [isServerAdminAuthenticated, setIsServerAdminAuthenticated] = useState(false);
   const [isSessionLoading, setIsSessionLoading] = useState(true);
+  const [lastSyncTime, setLastSyncTime] = useState(() => new Date());
+  const [isLiveConnected, setIsLiveConnected] = useState(true);
   const [registrationSettings, setRegistrationSettings] = useState({
     allowlistEnabled: false,
     allowedDomains: ['svit.ac.in', 'pravara.in', 'sinhgad.edu'],
@@ -733,30 +764,50 @@ export const AppProvider = ({ children }) => {
    */
   const refreshSharedState = useCallback(async (overrideToken = undefined) => {
     const activeToken = overrideToken !== undefined ? overrideToken : localStorage.getItem(SESSION_TOKEN_KEY);
-    const data = await fetchSharedStateApi(activeToken);
-    if (!data) return null;
-
-    if (Array.isArray(data.students)) setStudents(data.students);
-    if (Array.isArray(data.submissions)) setSubmissions(data.submissions);
-    if (Array.isArray(data.certificates)) setCertificates(data.certificates);
-    if (data.manualOverrides && typeof data.manualOverrides === 'object') setManualOverrides(data.manualOverrides);
-    if (data.userConsents && typeof data.userConsents === 'object') setUserConsents(data.userConsents);
-    if (Array.isArray(data.proctoringFlags)) setProctoringFlags(data.proctoringFlags);
-    if (data.resultsPublished !== undefined) setResultsPublished(Boolean(data.resultsPublished));
-    if (data.allowExitedStudentsForCert !== undefined) setAllowExitedStudentsForCert(Boolean(data.allowExitedStudentsForCert));
-    if (data.registrationSettings && typeof data.registrationSettings === 'object') {
-      setRegistrationSettings(prev => ({ ...prev, ...data.registrationSettings }));
-    }
-
-    // Step 4: Load the user's name, roll number and track from the database using the session token
-    if (!isServerAdminRef.current) {
-      if (data.user) {
-        setUserState(data.user);
-      } else if (!activeToken) {
-        setUserState(prev => (prev?.role === 'admin' ? prev : null));
+    try {
+      const data = await fetchSharedStateApi(activeToken);
+      if (!data) {
+        setIsLiveConnected(false);
+        return null;
       }
+
+      setIsLiveConnected(true);
+      setLastSyncTime(new Date());
+
+      if (Array.isArray(data.students)) {
+        setStudents(data.students.map(sanitizeStudent));
+      }
+      if (Array.isArray(data.submissions)) {
+        setSubmissions(data.submissions.map(sanitizeSubmission));
+      }
+      if (Array.isArray(data.certificates)) setCertificates(data.certificates);
+      if (data.manualOverrides && typeof data.manualOverrides === 'object') setManualOverrides(data.manualOverrides);
+      if (data.userConsents && typeof data.userConsents === 'object') setUserConsents(data.userConsents);
+      if (Array.isArray(data.proctoringFlags)) setProctoringFlags(data.proctoringFlags);
+      if (data.resultsPublished !== undefined) setResultsPublished(Boolean(data.resultsPublished));
+      if (data.allowExitedStudentsForCert !== undefined) setAllowExitedStudentsForCert(Boolean(data.allowExitedStudentsForCert));
+      if (data.registrationSettings && typeof data.registrationSettings === 'object') {
+        setRegistrationSettings(prev => ({ ...prev, ...data.registrationSettings }));
+      }
+
+      // Step 4 & Problem 3: If student account was deleted on server or session invalidated, log out immediately!
+      if (!isServerAdminRef.current) {
+        if (data.sessionInvalidated || (activeToken && !data.user)) {
+          console.warn('[Auth] Session was invalidated or account deleted on server. Logging out immediately.');
+          localStorage.removeItem(SESSION_TOKEN_KEY);
+          setSessionTokenState(null);
+          setUserState(null);
+        } else if (data.user) {
+          setUserState(sanitizeStudent(data.user));
+        } else if (!activeToken) {
+          setUserState(prev => (prev?.role === 'admin' ? prev : null));
+        }
+      }
+      return data;
+    } catch (err) {
+      setIsLiveConnected(false);
+      return null;
     }
-    return data;
   }, []);
 
   /**
@@ -840,10 +891,10 @@ export const AppProvider = ({ children }) => {
 
     initializeAuthAndSharedDatabase();
 
-    // Poll every 8 seconds and on window focus so all devices stay synchronized
+    // Real-Time Sync: Poll every 5 seconds (as required by Problem 2) and on window focus
     const interval = setInterval(() => {
       refreshSharedState();
-    }, 8000);
+    }, 5000);
 
     const handleFocus = () => {
       refreshSharedState();
@@ -1345,7 +1396,10 @@ export const AppProvider = ({ children }) => {
       setResultsPublished,
       toggleResultsPublished,
       allowExitedStudentsForCert,
-      toggleAllowExitedForCert
+      toggleAllowExitedForCert,
+      lastSyncTime,
+      isLiveConnected,
+      refreshSharedState
     }}>
 
       {children}

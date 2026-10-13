@@ -674,5 +674,8 @@
   },
   "adminDevices": [],
   "adminSessions": [],
-  "adminIpRateLimits": {}
+  "adminIpRateLimits": {},
+  "deletedPrns": [],
+  "invalidatedTokens": [],
+  "adminAuditLogs": []
 }

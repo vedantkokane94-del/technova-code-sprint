@@ -13,6 +13,7 @@ import {
   Home
 } from 'lucide-react';
 import { SVITHubLogo } from './BrandLogo';
+import { safeInitials, safeSplit, safeTrim } from '../utils/safeString';
 
 export const Navbar = ({ currentTab, setCurrentTab }) => {
   const { theme, toggleTheme, user, setUser, isAdmin } = useApp();
@@ -35,13 +36,10 @@ export const Navbar = ({ currentTab, setCurrentTab }) => {
   };
 
   const getInitials = (name) => {
-    if (!name) return 'S';
-    const parts = name.trim().split(/\s+/);
-    if (parts.length >= 2) return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
-    return name.slice(0, 2).toUpperCase();
+    return safeInitials(name, 'S');
   };
 
-  const firstName = user?.name ? user.name.trim().split(/\s+/)[0] : 'Student';
+  const firstName = user?.name ? (safeSplit(safeTrim(user.name), /\s+/)[0] || 'Student') : 'Student';
   const userLanguage = user?.language || user?.track || 'Python';
 
   return (

@@ -15,6 +15,7 @@ import {
   Clock,
   ShieldCheck
 } from 'lucide-react';
+import { safeLowerCase, safeInitials, safeString } from '../utils/safeString';
 
 export const LeaderboardPage = () => {
   const { submissions, students, user, manualOverrides, refreshSharedState } = useApp();
@@ -90,10 +91,13 @@ export const LeaderboardPage = () => {
 
   // Filter
   const filtered = leaderboard.filter(item => {
-    const matchesLang = selectedLanguage === 'All' || 
-      item.language.toLowerCase() === selectedLanguage.toLowerCase();
-    const matchesSearch = item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          item.prn.toLowerCase().includes(searchQuery.toLowerCase());
+    const lang = safeLowerCase(item.language, 'python');
+    const selected = safeLowerCase(selectedLanguage, 'all');
+    const matchesLang = selected === 'all' || lang === selected;
+    const q = safeLowerCase(searchQuery).trim();
+    const matchesSearch = !q ||
+      safeLowerCase(item.name).includes(q) ||
+      safeLowerCase(item.prn).includes(q);
     return matchesLang && matchesSearch;
   });
 
@@ -256,7 +260,7 @@ export const LeaderboardPage = () => {
                       <td className="py-4 px-4 sm:px-6">
                         <div className="flex items-center gap-3">
                           <div className="w-8 h-8 rounded-full bg-[#FCF9F2] dark:bg-[#2A181C] border border-[#E8DEC8] dark:border-[#4A2028] text-[#B3122B] dark:text-[#ff8a9e] flex items-center justify-center font-bold text-xs shrink-0">
-                            {item.name.charAt(0)}
+                            {safeInitials(item.name).slice(0, 1)}
                           </div>
                           <div>
                             <div className="font-bold text-[#1A1A1A] dark:text-white flex items-center gap-1.5">

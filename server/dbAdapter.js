@@ -524,3 +524,77 @@ export async function pushToSupabaseIfConfigured(store) {
     console.error('[dbAdapter] Supabase write warning:', err.message);
   }
 }
+
+/**
+ * Cascade deletes a single student from Supabase tables (if configured)
+ */
+export async function deleteStudentFromDb(prn, uid) {
+  const cfg = getSupabaseConfig();
+  if (!cfg) return;
+
+  const headers = {
+    apikey: cfg.key,
+    Authorization: `Bearer ${cfg.key}`
+  };
+
+  const normPrn = String(prn || '').trim().toUpperCase();
+  const safeUid = String(uid || '').trim();
+
+  try {
+    const promises = [];
+    if (normPrn) {
+      promises.push(
+        fetch(`${cfg.url}/rest/v1/submissions?or=(prn.eq.${encodeURIComponent(normPrn)}${safeUid ? `,user_id.eq.${encodeURIComponent(safeUid)}` : ''})`, {
+          method: 'DELETE',
+          headers
+        }).catch(() => null)
+      );
+      promises.push(
+        fetch(`${cfg.url}/rest/v1/certificates?or=(prn.eq.${encodeURIComponent(normPrn)}${safeUid ? `,user_id.eq.${encodeURIComponent(safeUid)}` : ''})`, {
+          method: 'DELETE',
+          headers
+        }).catch(() => null)
+      );
+      promises.push(
+        fetch(`${cfg.url}/rest/v1/otp_verifications?prn=eq.${encodeURIComponent(normPrn)}`, {
+          method: 'DELETE',
+          headers
+        }).catch(() => null)
+      );
+      promises.push(
+        fetch(`${cfg.url}/rest/v1/users?prn=eq.${encodeURIComponent(normPrn)}`, {
+          method: 'DELETE',
+          headers
+        }).catch(() => null)
+      );
+    }
+    await Promise.all(promises);
+  } catch (err) {
+    console.error('[dbAdapter] Supabase student cascade delete error:', err.message);
+  }
+}
+
+/**
+ * Cascade deletes all student data from Supabase tables (if configured)
+ */
+export async function clearAllStudentsFromDb() {
+  const cfg = getSupabaseConfig();
+  if (!cfg) return;
+
+  const headers = {
+    apikey: cfg.key,
+    Authorization: `Bearer ${cfg.key}`
+  };
+
+  try {
+    await Promise.all([
+      fetch(`${cfg.url}/rest/v1/submissions?id=neq.placeholder`, { method: 'DELETE', headers }).catch(() => null),
+      fetch(`${cfg.url}/rest/v1/certificates?certificate_id=neq.placeholder`, { method: 'DELETE', headers }).catch(() => null),
+      fetch(`${cfg.url}/rest/v1/otp_verifications?prn=neq.placeholder`, { method: 'DELETE', headers }).catch(() => null),
+      fetch(`${cfg.url}/rest/v1/users?role=neq.admin`, { method: 'DELETE', headers }).catch(() => null)
+    ]);
+  } catch (err) {
+    console.error('[dbAdapter] Supabase clearAllStudentsFromDb error:', err.message);
+  }
+}
+

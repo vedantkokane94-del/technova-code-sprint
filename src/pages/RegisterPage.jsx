@@ -28,6 +28,7 @@ import {
   VALID_YEARS,
   VALID_DIVISIONS
 } from '../utils/registrationValidation';
+import { safeReplace, safeSlice } from '../utils/safeString';
 import {
   startRegistrationApi,
   resendOtpApi,
@@ -56,7 +57,7 @@ export const RegisterPage = ({ setCurrentTab }) => {
   const [formData, setFormData] = useState({
     name: user?.role !== 'admin' ? (user?.name || '') : '',
     email: user?.role !== 'admin' ? (user?.email || '') : '',
-    phone: user?.role !== 'admin' ? (user?.phone ? user.phone.replace(/^\+91/, '') : '') : '',
+    phone: user?.role !== 'admin' ? safeReplace(user?.phone, /^\+91/, '') : '',
     prn: user?.role !== 'admin' ? (user?.prn || '') : '',
     year: user?.role !== 'admin' ? (user?.year || 'First Year (FE)') : 'First Year (FE)',
     branch: user?.role !== 'admin' ? (user?.branch || 'Computer Engineering') : 'Computer Engineering',
@@ -105,7 +106,7 @@ export const RegisterPage = ({ setCurrentTab }) => {
         ...prev,
         name: user.name || prev.name,
         email: user.email || prev.email,
-        phone: user.phone ? user.phone.replace(/^\+91/, '') : prev.phone,
+        phone: user.phone ? safeReplace(user.phone, /^\+91/, '') : prev.phone,
         prn: user.prn || prev.prn,
         year: user.year || prev.year || 'First Year (FE)',
         branch: user.branch || prev.branch || 'Computer Engineering',
@@ -323,7 +324,7 @@ export const RegisterPage = ({ setCurrentTab }) => {
 
       const res = await startRegistrationApi({
         ...formData,
-        phone: `+91${String(formData.phone).replace(/\D/g, '').slice(-10)}`,
+        phone: `+91${safeSlice(safeReplace(formData.phone, /\D/g, ''), -10)}`,
         formLoadedAt: effectiveLoadedAt,
         captchaToken: captchaVerified ? captchaToken : '',
         isLegacyUpgrade: isLegacyUpgradeMode

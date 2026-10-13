@@ -14,12 +14,15 @@ import {
   Check,
   Settings,
   Mail,
-  Phone
+  Phone,
+  AlertTriangle,
+  X
 } from 'lucide-react';
 import {
   fetchAdminRegistrationsApi,
   adminRegistrationActionApi
 } from '../services/api';
+import { safeString, safeTrim, safeLowerCase } from '../utils/safeString';
 
 export const AdminRegistrationsPanel = ({ onDataChanged, showToast }) => {
   const [registrations, setRegistrations] = useState([]);
@@ -47,22 +50,43 @@ export const AdminRegistrationsPanel = ({ onDataChanged, showToast }) => {
   const [branchFilter, setBranchFilter] = useState('All');
   const [trackFilter, setTrackFilter] = useState('All');
 
-  const loadRegistrations = useCallback(async () => {
-    setIsLoading(true);
-    const data = await fetchAdminRegistrationsApi();
-    if (data) {
-      setRegistrations(data.registrations || []);
-      if (data.summary) setSummary(data.summary);
-      if (data.registrationSettings) {
-        setSettings(data.registrationSettings);
-        setDomainsInput((data.registrationSettings.allowedDomains || []).join(', '));
+  const [lastUpdated, setLastUpdated] = useState(() => new Date());
+  const [isLiveActive, setIsLiveActive] = useState(true);
+  const [studentToDelete, setStudentToDelete] = useState(null);
+  const [showClearAllModal, setShowClearAllModal] = useState(false);
+  const [clearAllInput, setClearAllInput] = useState('');
+  const [isProcessingAction, setIsProcessingAction] = useState(false);
+
+  const loadRegistrations = useCallback(async (isSilent = false) => {
+    if (!isSilent) setIsLoading(true);
+    try {
+      const data = await fetchAdminRegistrationsApi();
+      if (data) {
+        setRegistrations(data.registrations || []);
+        if (data.summary) setSummary(data.summary);
+        if (data.registrationSettings) {
+          setSettings(data.registrationSettings);
+          setDomainsInput((data.registrationSettings.allowedDomains || []).join(', '));
+        }
+        setLastUpdated(new Date());
+        setIsLiveActive(true);
+      } else {
+        setIsLiveActive(false);
       }
+    } catch (e) {
+      setIsLiveActive(false);
+    } finally {
+      if (!isSilent) setIsLoading(false);
     }
-    setIsLoading(false);
   }, []);
 
   useEffect(() => {
     loadRegistrations();
+    // Real-Time auto-refresh every 5 seconds without page refresh (Problem 2)
+    const interval = setInterval(() => {
+      loadRegistrations(true);
+    }, 5000);
+    return () => clearInterval(interval);
   }, [loadRegistrations]);
 
   const handleSaveSettings = async (e) => {
@@ -89,10 +113,8 @@ export const AdminRegistrationsPanel = ({ onDataChanged, showToast }) => {
 
   const handleAccountAction = async (action, student, reason = '') => {
     if (action === 'delete') {
-      const ok = window.confirm(
-        `Delete account "${student.name}" (Roll No: ${student.prn}, Email: ${student.email})? This will permanently remove the fake/spam registration and any associated submissions.`
-      );
-      if (!ok) return;
+      setStudentToDelete(student);
+      return;
     }
 
     const res = await adminRegistrationActionApi({
@@ -108,6 +130,49 @@ export const AdminRegistrationsPanel = ({ onDataChanged, showToast }) => {
       if (onDataChanged) onDataChanged();
     } else if (showToast) {
       showToast(res?.error || `Failed to perform ${action}.`);
+    }
+  };
+
+  const confirmDeleteStudent = async () => {
+    if (!studentToDelete) return;
+    setIsProcessingAction(true);
+    const res = await adminRegistrationActionApi({
+      action: 'delete',
+      prn: studentToDelete.prn,
+      uid: studentToDelete.uid
+    });
+    setIsProcessingAction(false);
+    setStudentToDelete(null);
+
+    if (res && res.success) {
+      if (showToast) showToast(res.message || 'Student permanently deleted.');
+      await loadRegistrations();
+      if (onDataChanged) onDataChanged();
+    } else if (showToast) {
+      showToast(res?.error || 'Failed to delete student.');
+    }
+  };
+
+  const confirmClearAllStudents = async () => {
+    if (clearAllInput.trim() !== 'CLEAR ALL') {
+      if (showToast) showToast('Please type "CLEAR ALL" exactly to confirm.');
+      return;
+    }
+    setIsProcessingAction(true);
+    const res = await adminRegistrationActionApi({
+      action: 'clear_all',
+      confirmationPhrase: 'CLEAR ALL'
+    });
+    setIsProcessingAction(false);
+    setShowClearAllModal(false);
+    setClearAllInput('');
+
+    if (res && res.success) {
+      if (showToast) showToast(res.message || 'All student records cleared.');
+      await loadRegistrations();
+      if (onDataChanged) onDataChanged();
+    } else if (showToast) {
+      showToast(res?.error || 'Failed to clear students.');
     }
   };
 
@@ -407,10 +472,20 @@ export const AdminRegistrationsPanel = ({ onDataChanged, showToast }) => {
           </select>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-bold flex items-center gap-1.5 ${
+            isLiveActive 
+              ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-700 dark:text-emerald-400'
+              : 'bg-amber-500/10 border-amber-500/20 text-amber-700 dark:text-amber-400'
+          }`}>
+            <span className={`w-2 h-2 rounded-full ${isLiveActive ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
+            <span>{isLiveActive ? 'Live' : 'Reconnecting...'}</span>
+            <span className="text-[10px] opacity-75 font-mono">({lastUpdated.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })})</span>
+          </div>
+
           <button
             type="button"
-            onClick={loadRegistrations}
+            onClick={() => loadRegistrations(false)}
             className="px-3 py-2 rounded-xl border border-[#E8DEC8] dark:border-[#2E3440] text-xs font-bold text-gray-700 dark:text-gray-200 hover:border-[#B3122B] flex items-center gap-1.5 cursor-pointer"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
@@ -424,7 +499,20 @@ export const AdminRegistrationsPanel = ({ onDataChanged, showToast }) => {
             className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs"
           >
             <Download className="w-3.5 h-3.5" />
-            <span>Export Registrations (CSV / Excel)</span>
+            <span>Export (CSV)</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setClearAllInput('');
+              setShowClearAllModal(true);
+            }}
+            data-testid="admin-clear-all-students-btn"
+            className="px-3.5 py-2 rounded-xl bg-red-600/10 hover:bg-red-600 border border-red-600/30 text-red-600 hover:text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-all shadow-xs"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            <span>Clear All Students</span>
           </button>
         </div>
       </div>
@@ -599,6 +687,125 @@ export const AdminRegistrationsPanel = ({ onDataChanged, showToast }) => {
           </table>
         </div>
       </div>
+
+      {/* Single Student Delete Confirmation Modal */}
+      {studentToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+          <div className="max-w-md w-full bg-white dark:bg-[#181B20] border border-red-200 dark:border-red-950/60 rounded-3xl p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5 text-red-600">
+                <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-950/40 flex items-center justify-center">
+                  <AlertTriangle className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-black text-base text-[#1A1A1A] dark:text-white">Delete Student Account</h3>
+                  <p className="text-xs text-gray-500">Permanent cascade deletion</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setStudentToDelete(null)}
+                className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-3.5 rounded-xl bg-gray-50 dark:bg-[#121418] border border-gray-200 dark:border-gray-800 text-xs space-y-1.5">
+              <div><strong>Name:</strong> {studentToDelete.name}</div>
+              <div><strong>Roll No:</strong> {studentToDelete.prn}</div>
+              <div><strong>Email:</strong> {studentToDelete.email}</div>
+              <div><strong>Track:</strong> {studentToDelete.track || studentToDelete.language}</div>
+              <div><strong>Department:</strong> {studentToDelete.branch}</div>
+            </div>
+
+            <p className="text-xs text-gray-600 dark:text-gray-400 leading-relaxed">
+              This will permanently delete this student record, their submissions, quiz scores, badges, certificates, and leaderboard ranking. Their login sessions will be invalidated immediately across all devices.
+            </p>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setStudentToDelete(null)}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isProcessingAction}
+                onClick={confirmDeleteStudent}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-red-600 hover:bg-red-700 text-white shadow-xs cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>{isProcessingAction ? 'Deleting...' : 'Confirm Delete'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Clear All Students Confirmation Modal */}
+      {showClearAllModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs">
+          <div className="max-w-md w-full bg-white dark:bg-[#181B20] border-2 border-red-500 rounded-3xl p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5 text-red-600">
+                <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-950/40 flex items-center justify-center">
+                  <AlertTriangle className="w-5 h-5 text-red-600" />
+                </div>
+                <div>
+                  <h3 className="font-black text-base text-red-600 dark:text-red-400">Clear All Student Data</h3>
+                  <p className="text-xs text-gray-500">Destructive administrative action</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowClearAllModal(false)}
+                className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-3.5 rounded-xl bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900/30 text-xs text-red-800 dark:text-red-300">
+              <strong>Warning:</strong> You are about to permanently delete <strong>{summary.total}</strong> registered student account(s), including all submissions, quiz marks, certificates, and leaderboard standings.
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="block text-xs font-bold text-gray-700 dark:text-gray-300">
+                To confirm, type <span className="font-mono text-red-600 bg-red-100 dark:bg-red-950/40 px-1 py-0.5 rounded">CLEAR ALL</span> below:
+              </label>
+              <input
+                type="text"
+                value={clearAllInput}
+                onChange={(e) => setClearAllInput(e.target.value)}
+                placeholder="Type CLEAR ALL to confirm"
+                className="w-full px-3.5 py-2 rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#121418] text-xs font-mono font-bold text-[#1A1A1A] dark:text-white"
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowClearAllModal(false)}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={clearAllInput.trim() !== 'CLEAR ALL' || isProcessingAction}
+                onClick={confirmClearAllStudents}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-red-600 hover:bg-red-700 text-white shadow-xs cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>{isProcessingAction ? 'Purging All Students...' : 'Wipe All Students'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
