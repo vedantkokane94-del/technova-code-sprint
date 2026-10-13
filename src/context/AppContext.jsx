@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { 
   SEED_TASKS, 
   SPRINT_SCHEDULE, 
@@ -14,7 +14,15 @@ import {
 import { getTaskVariant, calculateTextSimilarity, detectAiGeneratedContent } from '../utils/hash';
 import { calculateDayScore, computeUserSummary, formatScore, toScoreNumber, DAY_POINTS, PASS_MARK_POINTS, TOTAL_SPRINT_POINTS } from '../utils/scoring';
 import { DEFAULT_TEMPLATE_CONFIG } from '../utils/certificateGenerator';
-import { checkAdminSession, logoutAdminApi } from '../services/api';
+import { 
+  checkAdminSession, 
+  logoutAdminApi,
+  fetchSharedStateApi,
+  loginOrRegisterStudentApi,
+  logoutStudentApi,
+  submitTaskSolutionApi,
+  syncLocalBrowserDataApi
+} from '../services/api';
 
 const AppContext = createContext();
 
@@ -22,6 +30,7 @@ const AppContext = createContext();
 const INITIAL_STUDENTS = [];
 const INITIAL_SUBMISSIONS = [];
 
+const SESSION_TOKEN_KEY = 'technova_session_token';
 
 export const AppProvider = ({ children }) => {
   // Theme state: light / dark
@@ -42,42 +51,22 @@ export const AppProvider = ({ children }) => {
     setTheme(prev => prev === 'light' ? 'dark' : 'light');
   };
 
-  // Active User / Session: Null by default for brand new student registrations
-  const [user, setUser] = useState(() => {
-    const saved = localStorage.getItem('technova_active_user');
-    if (saved) {
-      try { return JSON.parse(saved); } catch (e) { return null; }
-    }
-    return null; // Ready for new student registration
+  // Student Session Token: Only the session token is stored in the browser (Step 4)
+  const [sessionToken, setSessionTokenState] = useState(() => {
+    return localStorage.getItem(SESSION_TOKEN_KEY) || null;
   });
 
-  // Ensure clean fresh start: remove all existing student and certificate data across browser sessions
-  useEffect(() => {
-    const DATA_EPOCH = "technova_svit_pristine_clean_launch_2026_v10";
-    if (localStorage.getItem("technova_epoch") !== DATA_EPOCH) {
-      const savedTheme = localStorage.getItem("technova_theme");
-      localStorage.clear();
-      localStorage.setItem("technova_epoch", DATA_EPOCH);
-      if (savedTheme) localStorage.setItem("technova_theme", savedTheme);
-      setUser(null);
-      setSubmissions([]);
-      setStudents([]);
-      setCertificates([]);
-      setManualOverrides({});
-      setEmailLogs([]);
-      setProctoringFlags([]);
-      setVerificationLogs([]);
-      setCurrentDay(1);
+  const setSessionToken = useCallback((token) => {
+    setSessionTokenState(token);
+    if (token) {
+      localStorage.setItem(SESSION_TOKEN_KEY, token);
+    } else {
+      localStorage.removeItem(SESSION_TOKEN_KEY);
     }
   }, []);
 
-  useEffect(() => {
-    if (user) {
-      localStorage.setItem('technova_active_user', JSON.stringify(user));
-    } else {
-      localStorage.removeItem('technova_active_user');
-    }
-  }, [user]);
+  // Active User loaded from shared database via sessionToken
+  const [user, setUserState] = useState(null);
 
   // Tasks State
   const [tasks, setTasks] = useState(() => {
@@ -93,74 +82,32 @@ export const AppProvider = ({ children }) => {
     localStorage.setItem('technova_tasks', JSON.stringify(newTasks));
   };
 
-  // Submissions State: Empty for fresh start
-  const [submissions, setSubmissions] = useState(() => {
-    const saved = localStorage.getItem('technova_submissions');
-    if (saved) {
-      try { return JSON.parse(saved); } catch (e) { return []; }
-    }
-    return [];
-  });
+  // Submissions State (single source of truth: shared database)
+  const [submissions, setSubmissions] = useState([]);
 
   const saveSubmissions = (newSubs) => {
     setSubmissions(newSubs);
-    localStorage.setItem('technova_submissions', JSON.stringify(newSubs));
+    syncLocalBrowserDataApi({ submissions: newSubs }).catch(() => {});
   };
 
-  // Registered Students State
-  const [students, setStudents] = useState(() => {
-    const saved = localStorage.getItem('technova_students');
-    if (saved) {
-      try { return JSON.parse(saved); } catch (e) { return []; }
-    }
-    return [];
-  });
+  // Registered Students State (single source of truth: shared database)
+  const [students, setStudents] = useState([]);
 
   const saveStudents = (newStudents) => {
     setStudents(newStudents);
-    localStorage.setItem('technova_students', JSON.stringify(newStudents));
+    syncLocalBrowserDataApi({ students: newStudents }).catch(() => {});
   };
 
-  // Sync active user into students list
-  useEffect(() => {
-    if (user && user.role !== 'admin' && user.prn) {
-      setStudents(prev => {
-        const idx = prev.findIndex(s => s.uid === user.uid || s.prn === user.prn);
-        let next;
-        if (idx >= 0) {
-          next = [...prev];
-          next[idx] = { ...next[idx], ...user };
-        } else {
-          next = [...prev, user];
-        }
-        localStorage.setItem('technova_students', JSON.stringify(next));
-        return next;
-      });
-    }
-  }, [user]);
-
-  // Certificates State
-  const [certificates, setCertificates] = useState(() => {
-    const saved = localStorage.getItem('technova_certificates');
-    if (saved) {
-      try { return JSON.parse(saved); } catch (e) { return []; }
-    }
-    return [];
-  });
+  // Certificates State (single source of truth: shared database)
+  const [certificates, setCertificates] = useState([]);
 
   const saveCertificates = (newCerts) => {
     setCertificates(newCerts);
-    localStorage.setItem('technova_certificates', JSON.stringify(newCerts));
+    syncLocalBrowserDataApi({ certificates: newCerts }).catch(() => {});
   };
 
   // Manual Eligibility Overrides State (map of userId/prn -> boolean)
-  const [manualOverrides, setManualOverrides] = useState(() => {
-    const saved = localStorage.getItem('technova_manual_overrides');
-    if (saved) {
-      try { return JSON.parse(saved); } catch (e) { return {}; }
-    }
-    return {};
-  });
+  const [manualOverrides, setManualOverrides] = useState({});
 
   const toggleManualOverride = (studentKey) => {
     setManualOverrides(prev => {
@@ -173,7 +120,7 @@ export const AppProvider = ({ children }) => {
       } else {
         next[studentKey] = !currentVal;
       }
-      localStorage.setItem('technova_manual_overrides', JSON.stringify(next));
+      syncLocalBrowserDataApi({ manualOverrides: next }).catch(() => {});
       return next;
     });
   };
@@ -285,14 +232,8 @@ export const AppProvider = ({ children }) => {
     });
   };
 
-  // User Proctoring & Honor Code Consents (remembers across Days 2 to 9)
-  const [userConsents, setUserConsents] = useState(() => {
-    const saved = localStorage.getItem('technova_user_consents');
-    if (saved) {
-      try { return JSON.parse(saved); } catch (e) { return {}; }
-    }
-    return {};
-  });
+  // User Proctoring & Honor Code Consents (remembers across Days 2 to 9, synced with shared DB)
+  const [userConsents, setUserConsents] = useState({});
 
   const saveUserConsent = (userId, consentData = {}) => {
     if (!userId) return;
@@ -306,7 +247,7 @@ export const AppProvider = ({ children }) => {
           consentedAt: consentData.consentedAt || new Date().toISOString()
         }
       };
-      localStorage.setItem('technova_user_consents', JSON.stringify(next));
+      syncLocalBrowserDataApi({ userConsents: next }).catch(() => {});
       return next;
     });
   };
@@ -394,35 +335,12 @@ export const AppProvider = ({ children }) => {
   };
 
   // Results Published and Certificate Eligibility Settings (synced with server)
-  const [resultsPublished, setResultsPublished] = useState(() => {
-    return localStorage.getItem('technova_results_published') === 'true';
-  });
-  const [allowExitedStudentsForCert, setAllowExitedStudentsForCert] = useState(() => {
-    return localStorage.getItem('technova_allow_exited_cert') === 'true';
-  });
-
-  useEffect(() => {
-    fetch('/api/certificates/public-settings')
-      .then(res => res.json())
-      .then(data => {
-        if (data) {
-          if (data.resultsPublished !== undefined) {
-            setResultsPublished(Boolean(data.resultsPublished));
-            localStorage.setItem('technova_results_published', String(Boolean(data.resultsPublished)));
-          }
-          if (data.allowExitedStudentsForCert !== undefined) {
-            setAllowExitedStudentsForCert(Boolean(data.allowExitedStudentsForCert));
-            localStorage.setItem('technova_allow_exited_cert', String(Boolean(data.allowExitedStudentsForCert)));
-          }
-        }
-      })
-      .catch(() => {});
-  }, []);
+  const [resultsPublished, setResultsPublished] = useState(false);
+  const [allowExitedStudentsForCert, setAllowExitedStudentsForCert] = useState(false);
 
   const toggleResultsPublished = async (newVal) => {
     const val = Boolean(newVal !== undefined ? newVal : !resultsPublished);
     setResultsPublished(val);
-    localStorage.setItem('technova_results_published', String(val));
     try {
       await fetch('/api/certificates/toggle-settings', {
         method: 'POST',
@@ -437,7 +355,6 @@ export const AppProvider = ({ children }) => {
   const toggleAllowExitedForCert = async (newVal) => {
     const val = Boolean(newVal !== undefined ? newVal : !allowExitedStudentsForCert);
     setAllowExitedStudentsForCert(val);
-    localStorage.setItem('technova_allow_exited_cert', String(val));
     try {
       await fetch('/api/certificates/toggle-settings', {
         method: 'POST',
@@ -484,7 +401,6 @@ export const AppProvider = ({ children }) => {
         const isTest = s.prn?.startsWith('TEST-') || s.prn?.startsWith('DEMO-') || s.email?.includes('test') || s.studentName?.toLowerCase().includes('test student');
         return !isTest;
       });
-      localStorage.setItem('technova_submissions', JSON.stringify(filtered));
       return filtered;
     });
 
@@ -493,7 +409,6 @@ export const AppProvider = ({ children }) => {
         const isTest = s.prn?.startsWith('TEST-') || s.prn?.startsWith('DEMO-') || s.email?.includes('test') || s.name?.toLowerCase().includes('test student');
         return !isTest;
       });
-      localStorage.setItem('technova_students', JSON.stringify(filtered));
       return filtered;
     });
   };
@@ -510,7 +425,8 @@ export const AppProvider = ({ children }) => {
           name: sub.studentName,
           prn: sub.prn,
           email: sub.email || `${sub.prn?.toLowerCase()}@svit.ac.in`,
-          track: sub.track || 'Web',
+          language: sub.language || sub.track || 'Python',
+          track: sub.track || sub.language || 'Python',
           role: 'student'
         });
       }
@@ -527,7 +443,7 @@ export const AppProvider = ({ children }) => {
   // Check eligibility for a student (pass mark points, not in Pending review, proctoring exit check, manual override check)
   const getStudentEligibility = (studentKey) => {
     const studentSubs = submissions.filter(s => s.userId === studentKey || s.prn === studentKey);
-    const summary = computeUserSummary(studentSubs, manualOverrides[studentKey]);
+    const summary = computeUserSummary(studentSubs, manualOverrides[studentKey] ?? manualOverrides[studentSubs[0]?.prn]);
     const totalScore = summary.totalScore;
     const hasFailedViva = studentSubs.some(s => s.failedViva);
     const hasUnresolvedFlag = studentSubs.some(s => s.needsViva || s.vivaRequired || s.status === 'flagged');
@@ -635,7 +551,7 @@ export const AppProvider = ({ children }) => {
         }
         return c;
       });
-      localStorage.setItem('technova_certificates', JSON.stringify(next));
+      syncLocalBrowserDataApi({ certificates: next }).catch(() => {});
       return next;
     });
   };
@@ -655,7 +571,7 @@ export const AppProvider = ({ children }) => {
         }
         return c;
       });
-      localStorage.setItem('technova_certificates', JSON.stringify(next));
+      syncLocalBrowserDataApi({ certificates: next }).catch(() => {});
       return next;
     });
   };
@@ -669,7 +585,7 @@ export const AppProvider = ({ children }) => {
         }
         return c;
       });
-      localStorage.setItem('technova_certificates', JSON.stringify(next));
+      syncLocalBrowserDataApi({ certificates: next }).catch(() => {});
       return next;
     });
   };
@@ -701,14 +617,8 @@ export const AppProvider = ({ children }) => {
     return entry;
   }, []);
 
-  // Proctoring Flags state (Section 5)
-  const [proctoringFlags, setProctoringFlags] = useState(() => {
-    const saved = localStorage.getItem('technova_proctoring_flags');
-    if (saved) {
-      try { return JSON.parse(saved); } catch (e) { return []; }
-    }
-    return [];
-  });
+  // Proctoring Flags state (Section 5, synced with shared DB)
+  const [proctoringFlags, setProctoringFlags] = useState([]);
 
   const addProctoringFlag = (flagData) => {
     const newFlag = {
@@ -719,7 +629,7 @@ export const AppProvider = ({ children }) => {
     };
     setProctoringFlags(prev => {
       const next = [newFlag, ...prev];
-      localStorage.setItem('technova_proctoring_flags', JSON.stringify(next));
+      syncLocalBrowserDataApi({ proctoringFlags: next }).catch(() => {});
       return next;
     });
     return newFlag;
@@ -738,7 +648,7 @@ export const AppProvider = ({ children }) => {
         }
         return f;
       });
-      localStorage.setItem('technova_proctoring_flags', JSON.stringify(next));
+      syncLocalBrowserDataApi({ proctoringFlags: next }).catch(() => {});
       return next;
     });
 
@@ -759,7 +669,7 @@ export const AppProvider = ({ children }) => {
             }
             return s;
           });
-          localStorage.setItem('technova_submissions', JSON.stringify(next));
+          syncLocalBrowserDataApi({ submissions: next }).catch(() => {});
           return next;
         });
       }
@@ -767,6 +677,7 @@ export const AppProvider = ({ children }) => {
   };
 
   const clearAllData = () => {
+    localStorage.removeItem(SESSION_TOKEN_KEY);
     localStorage.removeItem('technova_active_user');
     localStorage.removeItem('technova_submissions');
     localStorage.removeItem('technova_certificates');
@@ -779,7 +690,8 @@ export const AppProvider = ({ children }) => {
     localStorage.removeItem('technova_resend_requests');
     localStorage.removeItem('technova_email_audit_runs');
     localStorage.removeItem('technova_sprint_day');
-    setUser(null);
+    setSessionToken(null);
+    setUserState(null);
     setSubmissions([]);
     setCertificates([]);
     setManualOverrides({});
@@ -803,24 +715,222 @@ export const AppProvider = ({ children }) => {
   // Server-Verified Administrator Session State
   const [isServerAdminAuthenticated, setIsServerAdminAuthenticated] = useState(false);
   const [isSessionLoading, setIsSessionLoading] = useState(true);
+  const isServerAdminRef = useRef(false);
 
-  // Synchronize and verify administrator session with server-side HttpOnly session cookie
   useEffect(() => {
-    checkAdminSession().then(res => {
-      if (res && res.authenticated && res.user) {
-        setIsServerAdminAuthenticated(true);
-        setUser(res.user);
-      } else {
-        setIsServerAdminAuthenticated(false);
-        setUser(prev => (prev?.role === 'admin' ? null : prev));
+    isServerAdminRef.current = isServerAdminAuthenticated;
+  }, [isServerAdminAuthenticated]);
+
+  /**
+   * Refresh shared database state (users, submissions, certificates, leaderboard, settings)
+   * and load the logged-in student's profile from the database using their sessionToken.
+   */
+  const refreshSharedState = useCallback(async (overrideToken = undefined) => {
+    const activeToken = overrideToken !== undefined ? overrideToken : localStorage.getItem(SESSION_TOKEN_KEY);
+    const data = await fetchSharedStateApi(activeToken);
+    if (!data) return null;
+
+    if (Array.isArray(data.students)) setStudents(data.students);
+    if (Array.isArray(data.submissions)) setSubmissions(data.submissions);
+    if (Array.isArray(data.certificates)) setCertificates(data.certificates);
+    if (data.manualOverrides && typeof data.manualOverrides === 'object') setManualOverrides(data.manualOverrides);
+    if (data.userConsents && typeof data.userConsents === 'object') setUserConsents(data.userConsents);
+    if (Array.isArray(data.proctoringFlags)) setProctoringFlags(data.proctoringFlags);
+    if (data.resultsPublished !== undefined) setResultsPublished(Boolean(data.resultsPublished));
+    if (data.allowExitedStudentsForCert !== undefined) setAllowExitedStudentsForCert(Boolean(data.allowExitedStudentsForCert));
+
+    // Step 4: Load the user's name, roll number and track from the database using the session token
+    if (!isServerAdminRef.current) {
+      if (data.user) {
+        setUserState(data.user);
+      } else if (!activeToken) {
+        setUserState(prev => (prev?.role === 'admin' ? prev : null));
       }
-    }).catch((err) => {
-      console.warn('[AppContext] checkAdminSession error:', err);
-      setIsServerAdminAuthenticated(false);
-    }).finally(() => {
-      setIsSessionLoading(false);
-    });
+    }
+    return data;
   }, []);
+
+  /**
+   * Step 6 & Step 4:
+   * 1. Migrate any existing browser-stored localStorage data into the shared database non-destructively.
+   * 2. Remove raw user/student/submission keys from localStorage, keeping only `technova_session_token`.
+   * 3. Hydrate all state from the shared database and poll periodically so every device shows the same data.
+   */
+  useEffect(() => {
+    let isMounted = true;
+
+    async function initializeAuthAndSharedDatabase() {
+      try {
+        // 1. Check Admin session cookie
+        const adminRes = await checkAdminSession().catch(() => ({ authenticated: false }));
+        if (isMounted && adminRes && adminRes.authenticated && adminRes.user) {
+          setIsServerAdminAuthenticated(true);
+          isServerAdminRef.current = true;
+          setUserState(adminRes.user);
+        } else if (isMounted) {
+          setIsServerAdminAuthenticated(false);
+          isServerAdminRef.current = false;
+        }
+
+        // 2. Step 6: Check if this browser has legacy localStorage data that needs to be migrated into the shared DB
+        let currentToken = localStorage.getItem(SESSION_TOKEN_KEY);
+        const rawLegacyUser = localStorage.getItem('technova_active_user');
+        const rawLegacyStudents = localStorage.getItem('technova_students');
+        const rawLegacySubmissions = localStorage.getItem('technova_submissions');
+        const rawLegacyCerts = localStorage.getItem('technova_certificates');
+        const rawLegacyOverrides = localStorage.getItem('technova_manual_overrides');
+        const rawLegacyConsents = localStorage.getItem('technova_user_consents');
+
+        const hasLegacyBrowserData = Boolean(
+          rawLegacyUser || rawLegacyStudents || rawLegacySubmissions || rawLegacyCerts || rawLegacyOverrides || rawLegacyConsents
+        );
+
+        if (hasLegacyBrowserData) {
+          const parseSafe = (str, fallback) => {
+            if (!str) return fallback;
+            try { return JSON.parse(str); } catch (e) { return fallback; }
+          };
+          const legacyUser = parseSafe(rawLegacyUser, null);
+          const legacyStudents = parseSafe(rawLegacyStudents, []);
+          const legacySubmissions = parseSafe(rawLegacySubmissions, []);
+          const legacyCerts = parseSafe(rawLegacyCerts, []);
+          const legacyOverrides = parseSafe(rawLegacyOverrides, {});
+          const legacyConsents = parseSafe(rawLegacyConsents, {});
+
+          const syncRes = await syncLocalBrowserDataApi({
+            user: legacyUser && legacyUser.role !== 'admin' ? legacyUser : null,
+            students: legacyStudents,
+            submissions: legacySubmissions,
+            certificates: legacyCerts,
+            manualOverrides: legacyOverrides,
+            userConsents: legacyConsents
+          });
+
+          if (syncRes && syncRes.success) {
+            if (syncRes.sessionToken) {
+              currentToken = syncRes.sessionToken;
+              if (isMounted) setSessionToken(syncRes.sessionToken);
+            }
+            // Remove raw student/submission objects from localStorage so only the session token remains in the browser
+            localStorage.removeItem('technova_active_user');
+            localStorage.removeItem('technova_students');
+            localStorage.removeItem('technova_submissions');
+            localStorage.removeItem('technova_certificates');
+            localStorage.removeItem('technova_manual_overrides');
+            localStorage.removeItem('technova_user_consents');
+            localStorage.removeItem('technova_proctoring_flags');
+          }
+        }
+
+        // 3. Hydrate state from shared database
+        await refreshSharedState(currentToken);
+      } finally {
+        if (isMounted) setIsSessionLoading(false);
+      }
+    }
+
+    initializeAuthAndSharedDatabase();
+
+    // Poll every 8 seconds and on window focus so all devices stay synchronized
+    const interval = setInterval(() => {
+      refreshSharedState();
+    }, 8000);
+
+    const handleFocus = () => {
+      refreshSharedState();
+    };
+    window.addEventListener('focus', handleFocus);
+
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, [refreshSharedState, setSessionToken]);
+
+  /**
+   * Step 4: Student Login / Registration via Shared Database
+   * Supports both:
+   * - mode: 'lookup' (sign in on any laptop/phone using Roll Number or Email)
+   * - mode: 'register_or_update' (new student registration or profile update)
+   * Keeps ONLY `technova_session_token` in browser localStorage.
+   */
+  const loginStudent = async (payload) => {
+    const res = await loginOrRegisterStudentApi(payload);
+    if (!res || !res.success) {
+      return res || { success: false, error: 'Unable to sign in.' };
+    }
+    if (res.sessionToken) {
+      setSessionToken(res.sessionToken);
+    }
+    localStorage.removeItem('technova_active_user');
+    if (res.user) {
+      setUserState(res.user);
+    }
+    if (Array.isArray(res.students)) {
+      setStudents(res.students);
+    }
+    if (Array.isArray(res.submissions)) {
+      setSubmissions(res.submissions);
+    }
+    return res;
+  };
+
+  /**
+   * Student Logout: clears session token from browser and server
+   */
+  const logoutStudent = async () => {
+    const token = localStorage.getItem(SESSION_TOKEN_KEY);
+    setSessionToken(null);
+    localStorage.removeItem('technova_active_user');
+    setUserState(null);
+    if (token) {
+      await logoutStudentApi(token).catch(() => {});
+    }
+  };
+
+  /**
+   * Compatible setUser wrapper:
+   * - If called with null, logs out and clears session token.
+   * - If called with a student object, persists to the shared database and stores only the session token in localStorage.
+   */
+  const setUser = useCallback((nextUserOrUpdater) => {
+    setUserState(prev => {
+      const resolved = typeof nextUserOrUpdater === 'function' ? nextUserOrUpdater(prev) : nextUserOrUpdater;
+      if (!resolved) {
+        const token = localStorage.getItem(SESSION_TOKEN_KEY);
+        localStorage.removeItem(SESSION_TOKEN_KEY);
+        localStorage.removeItem('technova_active_user');
+        if (token) logoutStudentApi(token).catch(() => {});
+        return null;
+      }
+      if (resolved.role === 'admin') {
+        return resolved;
+      }
+      // Sync student profile to shared database and store only session token
+      localStorage.removeItem('technova_active_user');
+      loginOrRegisterStudentApi({
+        mode: 'register_or_update',
+        ...resolved
+      }).then(res => {
+        if (res && res.success) {
+          if (res.sessionToken) {
+            setSessionToken(res.sessionToken);
+          }
+          if (res.user) {
+            setUserState(res.user);
+          }
+          if (Array.isArray(res.students)) {
+            setStudents(res.students);
+          }
+          if (Array.isArray(res.submissions)) {
+            setSubmissions(res.submissions);
+          }
+        }
+      }).catch(() => {});
+      return resolved;
+    });
+  }, [setSessionToken]);
 
   // Admin Access Control: Server session must be verified (tamper-resistant)
   const isVedantAdmin = (u) => {
@@ -833,6 +943,7 @@ export const AppProvider = ({ children }) => {
   // Set authenticated admin user state
   const loginAsAdmin = (adminUser) => {
     setIsServerAdminAuthenticated(true);
+    isServerAdminRef.current = true;
     const u = {
       uid: adminUser?.uid || `svit-admin-${Date.now()}`,
       name: adminUser?.name || "Vedant Kokane",
@@ -844,8 +955,7 @@ export const AppProvider = ({ children }) => {
       role: "admin",
       department: adminUser?.department || "Technical Skill Development Hub"
     };
-    setUser(u);
-    localStorage.setItem('technova_active_user', JSON.stringify(u));
+    setUserState(u);
     return u;
   };
 
@@ -855,7 +965,8 @@ export const AppProvider = ({ children }) => {
       await logoutAdminApi();
     } catch (e) {}
     setIsServerAdminAuthenticated(false);
-    setUser(null);
+    isServerAdminRef.current = false;
+    setUserState(null);
     localStorage.removeItem('technova_active_user');
   };
 
@@ -863,7 +974,7 @@ export const AppProvider = ({ children }) => {
   const switchRole = (newRole) => {
     if (newRole === 'student') {
       const latestStudent = students[students.length - 1];
-      setUser(latestStudent || null);
+      setUserState(latestStudent || null);
     }
   };
 
@@ -911,7 +1022,9 @@ export const AppProvider = ({ children }) => {
     const assignedVariant = getTaskVariant(user.uid, activeDay);
 
     // Check if previous submission exists for this day
-    const existingIndex = submissions.findIndex(s => s.userId === user.uid && Number(s.day) === activeDay);
+    const existingIndex = submissions.findIndex(
+      s => (s.userId === user.uid || (s.prn && user.prn && s.prn.toUpperCase() === user.prn.toUpperCase())) && Number(s.day) === activeDay
+    );
     const prevSub = existingIndex >= 0 ? submissions[existingIndex] : null;
 
     // Disqualify quiz if tab switched while attempting task, or explicitly disqualified
@@ -946,10 +1059,11 @@ export const AppProvider = ({ children }) => {
     const attemptCount = (prevSub?.attempts || 0) + (attempts > 1 ? 0 : 1);
 
     const newSubData = {
-      id: prevSub ? prevSub.id : `sub-${user.uid}-day-${activeDay}`,
+      id: prevSub ? prevSub.id : `sub-${user.prn || user.uid}-day-${activeDay}`,
       userId: user.uid,
       studentName: user.name,
       prn: user.prn,
+      email: user.email || '',
       day: activeDay,
       language: language || user.language || user.track || 'Python',
       track: language || user.language || user.track || 'Python',
@@ -992,7 +1106,16 @@ export const AppProvider = ({ children }) => {
       updatedList = [newSubData, ...submissions];
     }
 
-    saveSubmissions(updatedList);
+    setSubmissions(updatedList);
+
+    // Persist submission immediately to shared database (Step 3 & Step 5)
+    const token = localStorage.getItem(SESSION_TOKEN_KEY);
+    submitTaskSolutionApi(newSubData, token).then(res => {
+      if (res && res.success && Array.isArray(res.submissions)) {
+        setSubmissions(res.submissions);
+      }
+    }).catch(() => {});
+
     return { 
       success: true, 
       points: finalPoints, 
@@ -1111,6 +1234,10 @@ export const AppProvider = ({ children }) => {
       toggleTheme,
       user,
       setUser,
+      sessionToken,
+      loginStudent,
+      logoutStudent,
+      refreshSharedState,
       isAdmin,
       isSessionLoading,
       isVedantAdmin,

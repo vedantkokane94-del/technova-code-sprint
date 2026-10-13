@@ -1,38 +1,74 @@
 {
-  "resetAt": "2026-10-11T15:43:08.371Z",
-  "students": [],
-  "submissions": [],
+  "students": [
+    {
+      "uid": "svit-stu-33",
+      "name": "Vedant Kokane",
+      "email": "vedantkokane94@gmail.com",
+      "prn": "33",
+      "year": "Second Year (SE)",
+      "branch": "Computer Engineering",
+      "language": "Python",
+      "track": "Python",
+      "role": "student",
+      "updatedAt": "2026-10-13T02:02:12.879Z"
+    }
+  ],
+  "submissions": [
+    {
+      "id": "sub-svit-stu-33-day-1",
+      "userId": "svit-stu-33",
+      "studentName": "Vedant Kokane",
+      "prn": "33",
+      "day": 1,
+      "language": "Python",
+      "track": "Python",
+      "programScore": 3.5,
+      "quizScore": 1.5,
+      "quizCorrect": 8,
+      "quizSubmitted": true,
+      "points": 5,
+      "rawTotal": 5,
+      "isCatchup": false,
+      "submittedAt": "2026-10-14T09:15:00.000Z",
+      "status": "approved"
+    }
+  ],
   "certificates": [],
   "manualOverrides": {},
+  "userConsentsMap": {},
+  "proctoringFlags": [],
   "emailLogs": [],
-  "sprintDay": 1,
-  "adminSeeded": {
-    "email": "faculty@svit.ac.in",
-    "role": "admin",
-    "name": "SVIT Faculty Administrator",
-    "department": "Technical Skill Development Hub",
-    "rollNo": "SVIT-FACULTY"
-  },
-  "adminRateLimit": {
-    "failedAttempts": 0,
-    "lockedUntil": 0
-  },
-  "adminLoginLogs": [],
-  "adminDevice": null,
-  "proctoringExits": [],
-  "judgingSettings": {
-    "negativeMarking": 0.25,
-    "quizTimeLimitSeconds": 600,
-    "judgingCriteriaText": ""
-  },
-  "proctoringSettings": {
-    "violationMode": "immediate_exit",
-    "warningsAllowed": 0,
-    "noFaceSeconds": 10,
-    "phoneConfidence": 0.55
-  },
   "resultsPublished": false,
   "allowExitedStudentsForCert": false,
+  "certificateAudit": {
+    "generationCount": 0,
+    "downloadCount": 0,
+    "revocationCount": 0,
+    "verificationCount": 0,
+    "logs": [
+      {
+        "id": "audit-1791820915784-47ci",
+        "action": "verify_not_found",
+        "certificateId": "CERT-2026-NONEXISTENT",
+        "timestamp": "2026-10-12T16:01:55.784Z",
+        "clientIp": "127.0.0.1"
+      },
+      {
+        "id": "audit-1791820715666-ml4r",
+        "action": "verify_not_found",
+        "certificateId": "CERT-2026-NONEXISTENT",
+        "timestamp": "2026-10-12T15:58:35.666Z",
+        "clientIp": "127.0.0.1"
+      },
+      {
+        "id": "audit-1791820657635-cuc6",
+        "action": "verify_not_found",
+        "certificateId": "CERT-2026-NONEXISTENT",
+        "timestamp": "2026-10-12T15:57:37.635Z",
+        "clientIp": "127.0.0.1"
+      }
+    ]
+  },
   "activeTestSessions": [
     {
       "sessionId": "sess-1791820945145-588r",
@@ -599,34 +635,32 @@
       "whitelistedAt": "2026-10-12T16:02:25.151Z"
     }
   ],
-  "certificateAudit": {
-    "generationCount": 0,
-    "downloadCount": 0,
-    "revocationCount": 0,
-    "verificationCount": 0,
-    "logs": [
-      {
-        "id": "audit-1791820915784-47ci",
-        "action": "verify_not_found",
-        "certificateId": "CERT-2026-NONEXISTENT",
-        "timestamp": "2026-10-12T16:01:55.784Z",
-        "clientIp": "127.0.0.1"
-      },
-      {
-        "id": "audit-1791820715666-ml4r",
-        "action": "verify_not_found",
-        "certificateId": "CERT-2026-NONEXISTENT",
-        "timestamp": "2026-10-12T15:58:35.666Z",
-        "clientIp": "127.0.0.1"
-      },
-      {
-        "id": "audit-1791820657635-cuc6",
-        "action": "verify_not_found",
-        "certificateId": "CERT-2026-NONEXISTENT",
-        "timestamp": "2026-10-12T15:57:37.635Z",
-        "clientIp": "127.0.0.1"
-      }
-    ]
+  "adminDevice": null,
+  "adminLoginLogs": [],
+  "adminRateLimit": {
+    "failedAttempts": 0,
+    "lockedUntil": 0
+  },
+  "proctoringExits": [],
+  "judgingSettings": {
+    "negativeMarking": 0.25,
+    "quizTimeLimitSeconds": 600,
+    "judgingCriteriaText": ""
+  },
+  "proctoringSettings": {
+    "violationMode": "immediate_exit",
+    "warningsAllowed": 0,
+    "noFaceSeconds": 10,
+    "phoneConfidence": 0.55
+  },
+  "resetAt": "2026-10-11T15:43:08.371Z",
+  "sprintDay": 1,
+  "adminSeeded": {
+    "email": "faculty@svit.ac.in",
+    "role": "admin",
+    "name": "SVIT Faculty Administrator",
+    "department": "Technical Skill Development Hub",
+    "rollNo": "SVIT-FACULTY"
   },
   "adminDevices": [],
   "adminSessions": [],

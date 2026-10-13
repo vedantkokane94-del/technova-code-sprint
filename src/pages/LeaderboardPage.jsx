@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { computeUserSummary, formatScore } from '../utils/scoring';
 import { 
@@ -17,22 +17,41 @@ import {
 } from 'lucide-react';
 
 export const LeaderboardPage = () => {
-  const { submissions, user, manualOverrides } = useApp();
+  const { submissions, students, user, manualOverrides, refreshSharedState } = useApp();
 
   const [selectedLanguage, setSelectedLanguage] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Group submissions by student
+  // Fetch latest leaderboard & submissions from shared database on mount
+  useEffect(() => {
+    if (typeof refreshSharedState === 'function') {
+      refreshSharedState();
+    }
+  }, [refreshSharedState]);
+
+  // Build lookup of registered students from shared database by PRN and UID
+  const registeredProfileByKey = {};
+  (students || []).forEach(st => {
+    if (!st) return;
+    if (st.prn) registeredProfileByKey[String(st.prn).trim().toUpperCase()] = st;
+    if (st.uid) registeredProfileByKey[String(st.uid).trim()] = st;
+  });
+
+  // Group submissions by student (show all registered students who have submitted)
   const studentMap = {};
 
   submissions.forEach(sub => {
-    const key = sub.userId || sub.prn;
+    const normPrn = sub.prn ? String(sub.prn).trim().toUpperCase() : '';
+    const key = normPrn || sub.userId;
+    if (!key) return;
+    const dbStudent = registeredProfileByKey[normPrn] || registeredProfileByKey[sub.userId] || null;
+
     if (!studentMap[key]) {
       studentMap[key] = {
-        userId: sub.userId,
-        name: sub.studentName,
-        prn: sub.prn,
-        language: sub.language || sub.track || 'Python',
+        userId: dbStudent?.uid || sub.userId,
+        name: dbStudent?.name || sub.studentName || 'Student',
+        prn: dbStudent?.prn || normPrn || sub.prn || '',
+        language: dbStudent?.language || dbStudent?.track || sub.language || sub.track || 'Python',
         submissions: []
       };
     }
@@ -41,7 +60,10 @@ export const LeaderboardPage = () => {
 
   // Calculate summaries with strict tie-breaking logic (Section 1)
   let leaderboard = Object.values(studentMap).map(stud => {
-    const summary = computeUserSummary(stud.submissions, manualOverrides[stud.userId || stud.prn]);
+    const overrideVal = manualOverrides[stud.userId] !== undefined
+      ? manualOverrides[stud.userId]
+      : manualOverrides[stud.prn];
+    const summary = computeUserSummary(stud.submissions, overrideVal);
     return {
       ...stud,
       summary

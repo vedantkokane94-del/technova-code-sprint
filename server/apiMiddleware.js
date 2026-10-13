@@ -2,8 +2,15 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
-
-const DATA_STORE_PATH = path.resolve(process.cwd(), 'data-store.json');
+import { computeUserSummary } from '../src/utils/scoring.js';
+import {
+  readLocalStore,
+  writeLocalStore,
+  mergeStores,
+  syncFromSupabaseIfConfigured,
+  pushToSupabaseIfConfigured,
+  isSupabaseConfigured
+} from './dbAdapter.js';
 
 // Ensure server-side env variables from .env are available even if not preloaded by bundler
 try {
@@ -24,71 +31,12 @@ try {
   }
 } catch (e) {}
 
-// Helper to safely read and write data-store.json
+// Helper to safely read and write shared store (Supabase + Serverless /tmp + local data-store.json)
 export function getStore() {
-  let store = null;
-  try {
-    if (fs.existsSync(DATA_STORE_PATH)) {
-      const content = fs.readFileSync(DATA_STORE_PATH, 'utf-8');
-      store = JSON.parse(content);
-    }
-  } catch (e) {
-    console.error("Error reading data store:", e);
-  }
-  if (!store) {
-    store = {
-      students: [],
-      submissions: [],
-      certificates: [],
-      resultsPublished: false,
-      allowExitedStudentsForCert: false,
-      certificateAudit: {
-        generationCount: 0,
-        downloadCount: 0,
-        revocationCount: 0,
-        verificationCount: 0,
-        logs: []
-      },
-      activeTestSessions: [],
-      studentConsents: [],
-      blockedAttempts: [],
-      studentWhitelists: [],
-      adminDevice: null,
-      adminLoginLogs: [],
-      adminRateLimit: { failedAttempts: 0, lockedUntil: 0 },
-      proctoringExits: [],
-      judgingSettings: {
-        negativeMarking: 0,
-        quizTimeLimitSeconds: 600,
-        marksPerQuestion: 1.25,
-        judgingCriteriaText: ''
-      },
-      proctoringSettings: {
-        violationMode: 'immediate_exit',
-        warningsAllowed: 0,
-        noFaceSeconds: 10,
-        phoneConfidence: 0.55
-      }
-    };
-  }
-  store.certificates = store.certificates || [];
-  store.resultsPublished = store.resultsPublished ?? false;
-  store.allowExitedStudentsForCert = store.allowExitedStudentsForCert ?? false;
-  store.activeTestSessions = store.activeTestSessions || [];
-  store.studentConsents = store.studentConsents || [];
-  store.blockedAttempts = store.blockedAttempts || [];
-  store.studentWhitelists = store.studentWhitelists || [];
-  store.certificateAudit = store.certificateAudit || {
-    generationCount: 0,
-    downloadCount: 0,
-    revocationCount: 0,
-    verificationCount: 0,
-    logs: []
-  };
-  return store;
+  return readLocalStore();
 }
 
-// In-memory rate limiting map for certificate public verification (max 20 req/min per IP)
+// In-memory rate limiting map for certificate public verification (max 60 req/min per IP)
 const verificationRateLimitMap = new Map();
 function checkVerificationRateLimit(ip) {
   if (ip === '127.0.0.1' || ip === '::1' || ip === 'localhost') {
@@ -109,11 +57,101 @@ function checkVerificationRateLimit(ip) {
 }
 
 export function saveStore(store) {
+  writeLocalStore(store);
+  pushToSupabaseIfConfigured(store).catch(() => {});
+}
+
+function getStudentTokenSecret() {
+  return process.env.SESSION_SECRET || process.env.ADMIN_JWT_SECRET || 'svit-technova-student-session-secret-2026';
+}
+
+function createStudentSessionToken(user) {
+  const payload = {
+    uid: user.uid,
+    prn: String(user.prn || '').trim().toUpperCase(),
+    name: user.name,
+    email: user.email,
+    year: user.year || 'First Year (FE)',
+    branch: user.branch || 'Computer Engineering',
+    language: user.language || user.track || 'Python',
+    track: user.track || user.language || 'Python',
+    role: 'student',
+    iat: Date.now()
+  };
+  const payloadB64 = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const sig = crypto.createHmac('sha256', getStudentTokenSecret()).update(payloadB64).digest('base64url');
+  return `TNV-STU.${payloadB64}.${sig}`;
+}
+
+function verifyStudentSessionToken(token) {
+  if (!token || typeof token !== 'string' || !token.startsWith('TNV-STU.')) return null;
+  const parts = token.split('.');
+  if (parts.length !== 3) return null;
+  const [, payloadB64, sig] = parts;
+  const expectedSig = crypto.createHmac('sha256', getStudentTokenSecret()).update(payloadB64).digest('base64url');
+  if (sig !== expectedSig) return null;
   try {
-    fs.writeFileSync(DATA_STORE_PATH, JSON.stringify(store, null, 2), 'utf-8');
+    return JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf-8'));
   } catch (e) {
-    console.error("Error saving data store:", e);
+    return null;
   }
+}
+
+function computeSharedLeaderboard(store) {
+  const studentLookup = new Map();
+  for (const s of store.students || []) {
+    if (s.prn) studentLookup.set(String(s.prn).trim().toUpperCase(), s);
+    if (s.uid) studentLookup.set(s.uid, s);
+  }
+
+  const studentMap = {};
+  for (const sub of store.submissions || []) {
+    const normPrn = String(sub.prn || '').trim().toUpperCase();
+    const key = normPrn || sub.userId;
+    if (!key) continue;
+    const profile = studentLookup.get(normPrn) || studentLookup.get(sub.userId) || null;
+    if (!studentMap[key]) {
+      studentMap[key] = {
+        userId: profile?.uid || sub.userId || `svit-stu-${normPrn}`,
+        name: profile?.name || sub.studentName || 'Student',
+        prn: normPrn || profile?.prn || sub.prn,
+        language: profile?.language || profile?.track || sub.language || sub.track || 'Python',
+        track: profile?.track || profile?.language || sub.track || sub.language || 'Python',
+        submissions: []
+      };
+    } else if (profile) {
+      studentMap[key].name = profile.name || studentMap[key].name;
+      studentMap[key].language = profile.language || profile.track || studentMap[key].language;
+      studentMap[key].track = profile.track || profile.language || studentMap[key].track;
+    }
+    studentMap[key].submissions.push(sub);
+  }
+
+  const overrides = store.manualOverrides || {};
+  const list = Object.values(studentMap).map(stud => {
+    const ov = overrides[stud.userId] ?? overrides[stud.prn];
+    const summary = computeUserSummary(stud.submissions, ov);
+    return {
+      ...stud,
+      summary
+    };
+  });
+
+  // Sort strictly by:
+  // 1. Total score out of 100 (descending)
+  // 2. On-time days count (descending)
+  // 3. Earlier last-submission time (ascending)
+  list.sort((a, b) => {
+    if (b.summary.totalScore !== a.summary.totalScore) {
+      return b.summary.totalScore - a.summary.totalScore;
+    }
+    if (b.summary.onTimeCount !== a.summary.onTimeCount) {
+      return b.summary.onTimeCount - a.summary.onTimeCount;
+    }
+    return (a.summary.lastSubmissionTime || Infinity) - (b.summary.lastSubmissionTime || Infinity);
+  });
+
+  return list;
 }
 
 // Cookie parser helper
@@ -423,6 +461,29 @@ export function createApiMiddleware() {
       return next();
     }
 
+    // Apply CORS headers so both technova-code-sprint-tq2j.vercel.app and technova-code-sprint.vercel.app share the same API
+    const origin = req.headers.origin || '';
+    if (
+      origin.endsWith('.vercel.app') ||
+      origin.endsWith('.svit.ac.in') ||
+      origin.startsWith('http://localhost') ||
+      origin.startsWith('http://127.0.0.1')
+    ) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+      res.setHeader(
+        'Access-Control-Allow-Headers',
+        'Content-Type, Authorization, x-student-session, x-student-session-token, x-device-factor, x-csrf-token, x-test-session-token'
+      );
+    }
+
+    if (req.method === 'OPTIONS') {
+      res.statusCode = 204;
+      res.end();
+      return;
+    }
+
     // Parse JSON body if POST/PUT
     let body = {};
     if (['POST', 'PUT', 'PATCH'].includes(req.method)) {
@@ -443,11 +504,12 @@ export function createApiMiddleware() {
     const cookies = parseCookies(req);
     const clientIp = getClientIp(req);
     const userAgent = req.headers['user-agent'] || 'Unknown';
-    const store = getStore();
+    const store = await syncFromSupabaseIfConfigured(getStore());
 
     const sendJson = (status, data, extraHeaders = {}) => {
       res.statusCode = status;
       res.setHeader('Content-Type', 'application/json');
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
       for (const [k, v] of Object.entries(extraHeaders)) {
         res.setHeader(k, v);
       }
@@ -1658,6 +1720,354 @@ export function createApiMiddleware() {
         success: true,
         resultsPublished: store.resultsPublished,
         allowExitedStudentsForCert: store.allowExitedStudentsForCert
+      });
+    }
+
+    // -------------------------------------------------------------
+    // 5. SHARED STUDENT DATABASE, SUBMISSIONS, LEADERBOARD & MIGRATION
+    // -------------------------------------------------------------
+
+    // Helper: Resolve current student from Authorization / x-student-session token
+    const resolveStudentFromToken = () => {
+      const authHeader = req.headers.authorization || '';
+      const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+      const token = bearerToken || req.headers['x-student-session-token'] || req.headers['x-student-session'] || body.sessionToken || '';
+      if (!token) return null;
+
+      // 1. Check store.students by sessionToken
+      const byToken = (store.students || []).find(s => s.sessionToken && s.sessionToken === token);
+      if (byToken) return byToken;
+
+      // 2. Verify signed stateless student token and hydrate/match student in store
+      const decoded = verifyStudentSessionToken(token);
+      if (decoded && decoded.prn) {
+        const normPrn = String(decoded.prn).trim().toUpperCase();
+        const existingIdx = (store.students || []).findIndex(
+          s => String(s.prn || '').trim().toUpperCase() === normPrn || s.uid === decoded.uid
+        );
+        if (existingIdx >= 0) {
+          store.students[existingIdx].sessionToken = token;
+          return store.students[existingIdx];
+        }
+        // Re-register student into store if missing after serverless cold start
+        const restored = {
+          uid: decoded.uid || `svit-stu-${normPrn}`,
+          prn: normPrn,
+          name: decoded.name || 'Student',
+          email: decoded.email || `${normPrn.toLowerCase()}@svit.ac.in`,
+          year: decoded.year || 'First Year (FE)',
+          branch: decoded.branch || 'Computer Engineering',
+          language: decoded.language || decoded.track || 'Python',
+          track: decoded.track || decoded.language || 'Python',
+          role: 'student',
+          sessionToken: token
+        };
+        store.students = store.students || [];
+        store.students.push(restored);
+        saveStore(store);
+        return restored;
+      }
+
+      return null;
+    };
+
+    // 5.1 Fetch Shared Application State & Current Student Profile: GET /api/state
+    if (url === '/api/state' && (req.method === 'GET' || req.method === 'POST')) {
+      const activeStudent = resolveStudentFromToken();
+      const leaderboard = computeSharedLeaderboard(store);
+      return sendJson(200, {
+        user: activeStudent
+          ? {
+              uid: activeStudent.uid,
+              name: activeStudent.name,
+              email: activeStudent.email,
+              prn: activeStudent.prn,
+              year: activeStudent.year,
+              branch: activeStudent.branch,
+              language: activeStudent.language || activeStudent.track || 'Python',
+              track: activeStudent.track || activeStudent.language || 'Python',
+              role: 'student'
+            }
+          : null,
+        students: (store.students || []).map(s => ({
+          uid: s.uid,
+          name: s.name,
+          prn: s.prn,
+          email: s.email,
+          year: s.year,
+          branch: s.branch,
+          language: s.language || s.track || 'Python',
+          track: s.track || s.language || 'Python',
+          role: 'student'
+        })),
+        submissions: store.submissions || [],
+        leaderboard,
+        certificates: store.certificates || [],
+        manualOverrides: store.manualOverrides || {},
+        userConsents: store.userConsentsMap || {},
+        proctoringFlags: store.proctoringFlags || [],
+        resultsPublished: store.resultsPublished ?? false,
+        allowExitedStudentsForCert: store.allowExitedStudentsForCert ?? false,
+        judgingSettings: store.judgingSettings || {},
+        proctoringSettings: store.proctoringSettings || {},
+        supabaseConnected: isSupabaseConfigured()
+      });
+    }
+
+    // 5.2 Student Login / Registration (Single Source of Truth): POST /api/students/login
+    if (url === '/api/students/login' && req.method === 'POST') {
+      const rawPrn = String(body.prn || '').trim().toUpperCase();
+      const rawEmail = String(body.email || '').trim().toLowerCase();
+      const rawName = String(body.name || '').trim();
+      const mode = body.mode || (rawName ? 'register_or_update' : 'lookup');
+
+      if (!rawPrn && !rawEmail) {
+        return sendJson(400, { error: "Please enter your College Roll Number (or Email Address)." });
+      }
+
+      store.students = store.students || [];
+      store.submissions = store.submissions || [];
+
+      // Look up existing student in store.students by PRN or Email
+      let existingIdx = store.students.findIndex(
+        s =>
+          (rawPrn && String(s.prn || '').trim().toUpperCase() === rawPrn) ||
+          (rawEmail && String(s.email || '').trim().toLowerCase() === rawEmail)
+      );
+
+      // Also check if student exists in store.submissions (in case submission was synced first)
+      const matchingSub = store.submissions.find(
+        sub =>
+          (rawPrn && String(sub.prn || '').trim().toUpperCase() === rawPrn) ||
+          (rawEmail && String(sub.email || '').trim().toLowerCase() === rawEmail)
+      );
+
+      if (mode === 'lookup' && existingIdx < 0 && !matchingSub) {
+        return sendJson(404, {
+          error: `No registered student found with Roll Number "${rawPrn || rawEmail}". Please complete New Student Registration below.`
+        });
+      }
+
+      const existingStudent = existingIdx >= 0 ? store.students[existingIdx] : null;
+      const finalPrn = rawPrn || existingStudent?.prn || matchingSub?.prn;
+      const cleanPrnId = String(finalPrn).replace(/[^A-Z0-9]/gi, '').toUpperCase();
+      const finalUid = existingStudent?.uid || matchingSub?.userId || `svit-stu-${cleanPrnId}`;
+      const finalName = rawName || existingStudent?.name || matchingSub?.studentName || 'Student';
+      const finalEmail = rawEmail || existingStudent?.email || `${cleanPrnId.toLowerCase()}@svit.ac.in`;
+      const finalYear = body.year || existingStudent?.year || 'First Year (FE)';
+      const finalBranch = body.branch || existingStudent?.branch || 'Computer Engineering';
+      const finalLanguage = body.language || body.track || existingStudent?.language || existingStudent?.track || matchingSub?.language || 'Python';
+
+      const studentRecord = {
+        uid: finalUid,
+        name: finalName,
+        email: finalEmail,
+        prn: finalPrn,
+        year: finalYear,
+        branch: finalBranch,
+        language: finalLanguage,
+        track: finalLanguage,
+        role: 'student',
+        updatedAt: new Date().toISOString()
+      };
+
+      const sessionToken = createStudentSessionToken(studentRecord);
+      studentRecord.sessionToken = sessionToken;
+
+      if (existingIdx >= 0) {
+        store.students[existingIdx] = { ...store.students[existingIdx], ...studentRecord };
+      } else {
+        store.students.push(studentRecord);
+      }
+
+      // Normalize any existing submissions for this Roll Number so userId, name, and track stay in sync
+      store.submissions = store.submissions.map(sub => {
+        if (String(sub.prn || '').trim().toUpperCase() === finalPrn || sub.userId === finalUid) {
+          return {
+            ...sub,
+            userId: finalUid,
+            prn: finalPrn,
+            studentName: finalName,
+            language: sub.language || finalLanguage,
+            track: sub.track || finalLanguage
+          };
+        }
+        return sub;
+      });
+
+      saveStore(store);
+
+      const { sessionToken: _omit, ...publicUser } = studentRecord;
+      return sendJson(200, {
+        success: true,
+        user: publicUser,
+        sessionToken,
+        students: store.students.map(({ sessionToken: _st, ...rest }) => rest),
+        submissions: store.submissions,
+        leaderboard: computeSharedLeaderboard(store)
+      });
+    }
+
+    // 5.3 Student Logout: POST /api/students/logout
+    if (url === '/api/students/logout' && req.method === 'POST') {
+      const student = resolveStudentFromToken();
+      if (student) {
+        student.sessionToken = null;
+        saveStore(store);
+      }
+      return sendJson(200, { success: true });
+    }
+
+    // 5.4 Submit or Update Daily Program & Quiz Solution: POST /api/submissions
+    if (url === '/api/submissions' && req.method === 'POST') {
+      const sub = body.submission || body;
+      if (!sub || !sub.day || (!sub.prn && !sub.userId)) {
+        return sendJson(400, { error: "Invalid submission payload: missing day or student identifier." });
+      }
+
+      const normPrn = String(sub.prn || '').trim().toUpperCase();
+      const dayNum = Number(sub.day);
+
+      // Ensure student exists in store.students
+      store.students = store.students || [];
+      const stuIdx = store.students.findIndex(
+        s => (normPrn && String(s.prn || '').trim().toUpperCase() === normPrn) || (sub.userId && s.uid === sub.userId)
+      );
+      const canonicalUid = stuIdx >= 0 ? store.students[stuIdx].uid : (sub.userId || `svit-stu-${normPrn}`);
+      const canonicalName = stuIdx >= 0 ? store.students[stuIdx].name : (sub.studentName || 'Student');
+      const canonicalLang = sub.language || sub.track || (stuIdx >= 0 ? store.students[stuIdx].language : 'Python');
+
+      if (stuIdx < 0 && normPrn) {
+        store.students.push({
+          uid: canonicalUid,
+          prn: normPrn,
+          name: canonicalName,
+          email: sub.email || `${normPrn.toLowerCase()}@svit.ac.in`,
+          year: sub.year || 'First Year (FE)',
+          branch: sub.branch || 'Computer Engineering',
+          language: canonicalLang,
+          track: canonicalLang,
+          role: 'student',
+          updatedAt: new Date().toISOString()
+        });
+      }
+
+      const normalizedSub = {
+        ...sub,
+        id: sub.id || `sub-${canonicalUid}-day-${dayNum}`,
+        userId: canonicalUid,
+        prn: normPrn || sub.prn,
+        studentName: canonicalName,
+        day: dayNum,
+        language: canonicalLang,
+        track: canonicalLang,
+        submittedAt: sub.submittedAt || new Date().toISOString()
+      };
+
+      store.submissions = store.submissions || [];
+      const existingSubIdx = store.submissions.findIndex(
+        s =>
+          Number(s.day) === dayNum &&
+          ((normPrn && String(s.prn || '').trim().toUpperCase() === normPrn) || s.userId === canonicalUid)
+      );
+
+      if (existingSubIdx >= 0) {
+        const prev = store.submissions[existingSubIdx];
+        store.submissions[existingSubIdx] = {
+          ...prev,
+          ...normalizedSub,
+          points: normalizedSub.quizDisqualified
+            ? normalizedSub.points
+            : Math.max(Number(prev.points || 0), Number(normalizedSub.points || 0)),
+          programScore: Math.max(Number(prev.programScore || 0), Number(normalizedSub.programScore || 0)),
+          quizScore: normalizedSub.quizDisqualified
+            ? 0
+            : Math.max(Number(prev.quizScore || 0), Number(normalizedSub.quizScore || 0))
+        };
+      } else {
+        store.submissions.unshift(normalizedSub);
+      }
+
+      saveStore(store);
+
+      return sendJson(200, {
+        success: true,
+        submission: existingSubIdx >= 0 ? store.submissions[existingSubIdx] : normalizedSub,
+        submissions: store.submissions,
+        leaderboard: computeSharedLeaderboard(store)
+      });
+    }
+
+    // 5.5 Public Leaderboard Endpoint: GET /api/leaderboard
+    if (url === '/api/leaderboard' && req.method === 'GET') {
+      const fullLeaderboard = computeSharedLeaderboard(store);
+      let filtered = fullLeaderboard;
+      try {
+        const parsedUrl = new URL(req.url, 'http://localhost');
+        const track = (parsedUrl.searchParams.get('track') || parsedUrl.searchParams.get('language') || 'All').trim();
+        const search = (parsedUrl.searchParams.get('search') || '').trim().toLowerCase();
+        if (track && track.toLowerCase() !== 'all') {
+          filtered = filtered.filter(item => (item.language || '').toLowerCase() === track.toLowerCase());
+        }
+        if (search) {
+          filtered = filtered.filter(
+            item =>
+              (item.name || '').toLowerCase().includes(search) ||
+              String(item.prn || '').toLowerCase().includes(search)
+          );
+        }
+      } catch (e) {}
+
+      return sendJson(200, {
+        leaderboard: filtered,
+        totalStudents: (store.students || []).length,
+        totalSubmissions: (store.submissions || []).length
+      });
+    }
+
+    // 5.6 Non-Destructive Browser-to-Database Migration & State Sync: POST /api/sync
+    if (url === '/api/sync' && req.method === 'POST') {
+      const incomingStudents = Array.isArray(body.students) ? [...body.students] : [];
+      if (body.user && body.user.role !== 'admin' && body.user.prn) {
+        incomingStudents.push(body.user);
+      }
+
+      const merged = mergeStores(store, {
+        students: incomingStudents,
+        submissions: body.submissions || [],
+        certificates: body.certificates || [],
+        manualOverrides: body.manualOverrides || {},
+        userConsentsMap: body.userConsents || {}
+      });
+
+      Object.assign(store, merged);
+
+      // If a browser migrated an active student user, issue a session token so only the token is kept in browser
+      let issuedSessionToken = null;
+      let resolvedUser = null;
+      if (body.user && body.user.role !== 'admin' && body.user.prn) {
+        const normPrn = String(body.user.prn).trim().toUpperCase();
+        const idx = (store.students || []).findIndex(s => String(s.prn || '').trim().toUpperCase() === normPrn);
+        if (idx >= 0) {
+          issuedSessionToken = createStudentSessionToken(store.students[idx]);
+          store.students[idx].sessionToken = issuedSessionToken;
+          const { sessionToken: _st, ...pub } = store.students[idx];
+          resolvedUser = pub;
+        }
+      }
+
+      saveStore(store);
+
+      return sendJson(200, {
+        success: true,
+        sessionToken: issuedSessionToken,
+        user: resolvedUser,
+        students: (store.students || []).map(({ sessionToken: _st, ...rest }) => rest),
+        submissions: store.submissions || [],
+        leaderboard: computeSharedLeaderboard(store),
+        certificates: store.certificates || [],
+        manualOverrides: store.manualOverrides || {},
+        userConsents: store.userConsentsMap || {}
       });
     }
 

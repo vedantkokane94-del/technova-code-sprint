@@ -8,9 +8,33 @@ import {
 } from '../utils/deviceSecurity';
 
 /**
- * Client API Service for Admin Device Lock & Proctoring Auto-Exit Enforcement
+ * Client API Service for Shared Database Sync, Student Auth, Submissions, Leaderboard,
+ * Admin Device Lock & Proctoring Auto-Exit Enforcement
  * Sir Visvesvaraya Institute of Technology (SVIT), Nashik
  */
+
+/**
+ * Canonical API Base URL:
+ * Ensures that even if a user accesses the secondary Vercel deployment (technova-code-sprint.vercel.app),
+ * all student/leaderboard/submission API requests hit the single canonical production backend
+ * (https://technova-code-sprint-tq2j.vercel.app) so every device shares one backend.
+ */
+export function getApiBaseUrl() {
+  if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_BASE_URL) {
+    return import.meta.env.VITE_API_BASE_URL.replace(/\/$/, '');
+  }
+  if (typeof window !== 'undefined' && window.location) {
+    const host = window.location.hostname;
+    if (host === 'technova-code-sprint.vercel.app') {
+      return 'https://technova-code-sprint-tq2j.vercel.app';
+    }
+  }
+  return '';
+}
+
+function apiUrl(path) {
+  return `${getApiBaseUrl()}${path}`;
+}
 
 async function getAdminHeaders(extraHeaders = {}) {
   const secret = await getDeviceSecretFromIndexedDB();
@@ -228,11 +252,10 @@ export async function saveExamSettings(payload) {
 
 export async function reportProctoringExit(exitData) {
   try {
-    const res = await fetch('/api/proctoring/exit', {
+    const res = await fetch(apiUrl('/api/proctoring/exit'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(exitData),
-      credentials: 'same-origin'
+      body: JSON.stringify(exitData)
     });
     return await res.json();
   } catch (err) {
@@ -243,11 +266,10 @@ export async function reportProctoringExit(exitData) {
 
 export async function checkProctoringStatus(userId, day, testType = 'all') {
   try {
-    const res = await fetch('/api/proctoring/status', {
+    const res = await fetch(apiUrl('/api/proctoring/status'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId, day, testType }),
-      credentials: 'same-origin'
+      body: JSON.stringify({ userId, day, testType })
     });
     if (!res.ok) return { isLockedOut: false };
     return await res.json();
@@ -258,14 +280,13 @@ export async function checkProctoringStatus(userId, day, testType = 'all') {
 
 export async function verifySubmissionAllowed(userId, day, testType = 'all', sessionToken = null, fingerprint = null) {
   try {
-    const res = await fetch('/api/proctoring/verify-submission', {
+    const res = await fetch(apiUrl('/api/proctoring/verify-submission'), {
       method: 'POST',
       headers: { 
         'Content-Type': 'application/json',
         ...(sessionToken ? { 'x-test-session-token': sessionToken } : {})
       },
-      body: JSON.stringify({ userId, day, testType, sessionToken, fingerprint }),
-      credentials: 'same-origin'
+      body: JSON.stringify({ userId, day, testType, sessionToken, fingerprint })
     });
     const data = await res.json();
     if (!res.ok) {
@@ -280,11 +301,10 @@ export async function verifySubmissionAllowed(userId, day, testType = 'all', ses
 
 export async function verifyBrowserIntegrityApi(payload) {
   try {
-    const res = await fetch('/api/proctoring/verify-browser', {
+    const res = await fetch(apiUrl('/api/proctoring/verify-browser'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-      credentials: 'same-origin'
+      body: JSON.stringify(payload)
     });
     const data = await res.json();
     if (!res.ok) {
@@ -298,11 +318,10 @@ export async function verifyBrowserIntegrityApi(payload) {
 
 export async function submitServerConsentApi(payload) {
   try {
-    const res = await fetch('/api/proctoring/submit-consent', {
+    const res = await fetch(apiUrl('/api/proctoring/submit-consent'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-      credentials: 'same-origin'
+      body: JSON.stringify(payload)
     });
     return await res.json();
   } catch (err) {
@@ -312,11 +331,10 @@ export async function submitServerConsentApi(payload) {
 
 export async function createTestSessionApi(payload) {
   try {
-    const res = await fetch('/api/proctoring/create-session', {
+    const res = await fetch(apiUrl('/api/proctoring/create-session'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-      credentials: 'same-origin'
+      body: JSON.stringify(payload)
     });
     const data = await res.json();
     if (!res.ok) {
@@ -330,14 +348,13 @@ export async function createTestSessionApi(payload) {
 
 export async function sendTestHeartbeatApi(payload) {
   try {
-    const res = await fetch('/api/proctoring/heartbeat', {
+    const res = await fetch(apiUrl('/api/proctoring/heartbeat'), {
       method: 'POST',
       headers: { 
         'Content-Type': 'application/json',
         ...(payload.token ? { 'x-test-session-token': payload.token } : {})
       },
-      body: JSON.stringify(payload),
-      credentials: 'same-origin'
+      body: JSON.stringify(payload)
     });
     const data = await res.json();
     if (!res.ok) {
@@ -410,3 +427,118 @@ export async function removeWhitelistApi(userId) {
     return { success: false, error: err.message };
   }
 }
+
+/* ============================================================================
+ * SHARED DATABASE API CLIENT (USERS, SESSIONS, SUBMISSIONS, LEADERBOARD, SYNC)
+ * ============================================================================ */
+
+export async function fetchSharedStateApi(sessionToken = null) {
+  try {
+    const headers = { 'Accept': 'application/json' };
+    if (sessionToken) {
+      headers['x-student-session-token'] = sessionToken;
+    }
+    const res = await fetch(apiUrl('/api/state'), {
+      method: 'GET',
+      headers,
+      cache: 'no-store'
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (err) {
+    console.warn('[api] fetchSharedStateApi warning:', err);
+    return null;
+  }
+}
+
+export async function loginOrRegisterStudentApi(payload) {
+  try {
+    const res = await fetch(apiUrl('/api/students/login'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      return {
+        success: false,
+        status: res.status,
+        notFound: Boolean(data.notFound),
+        error: data.error || `HTTP ${res.status}`
+      };
+    }
+    return data;
+  } catch (err) {
+    return { success: false, error: err.message || 'Network request failed' };
+  }
+}
+
+export async function logoutStudentApi(sessionToken) {
+  try {
+    const res = await fetch(apiUrl('/api/students/logout'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(sessionToken ? { 'x-student-session-token': sessionToken } : {})
+      },
+      body: JSON.stringify({ sessionToken })
+    });
+    return res.ok;
+  } catch (err) {
+    return false;
+  }
+}
+
+export async function submitTaskSolutionApi(submission, sessionToken = null) {
+  try {
+    const res = await fetch(apiUrl('/api/submissions'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(sessionToken ? { 'x-student-session-token': sessionToken } : {})
+      },
+      body: JSON.stringify({ submission })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      return { success: false, error: data.error || `HTTP ${res.status}` };
+    }
+    return data;
+  } catch (err) {
+    return { success: false, error: err.message || 'Network request failed' };
+  }
+}
+
+export async function fetchLeaderboardApi(track = 'All', search = '') {
+  try {
+    const params = new URLSearchParams();
+    if (track && track !== 'All') params.set('track', track);
+    if (search) params.set('search', search);
+    const query = params.toString() ? `?${params.toString()}` : '';
+    const res = await fetch(apiUrl(`/api/leaderboard${query}`), {
+      method: 'GET',
+      headers: { 'Accept': 'application/json' },
+      cache: 'no-store'
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (err) {
+    return null;
+  }
+}
+
+export async function syncLocalBrowserDataApi(payload) {
+  try {
+    const res = await fetch(apiUrl('/api/sync'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (err) {
+    console.warn('[api] syncLocalBrowserDataApi warning:', err);
+    return null;
+  }
+}
+
