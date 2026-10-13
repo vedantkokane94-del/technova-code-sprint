@@ -198,7 +198,7 @@ export const RegisterPage = ({ setCurrentTab }) => {
     setLoginError('');
     setIsLoggingIn(true);
 
-    const prnVal = loginPrn.trim().toUpperCase();
+    const prnVal = loginPrn.trim().replace(/\s+/g, '').toUpperCase();
     const emailVal = loginEmail.trim().toLowerCase();
 
     if (!prnVal && !emailVal) {
@@ -280,7 +280,8 @@ export const RegisterPage = ({ setCurrentTab }) => {
         phone: `+91${safeSlice(safeReplace(formData.phone, /\D/g, ''), -10)}`,
         formLoadedAt: effectiveLoadedAt,
         captchaToken: captchaVerified ? captchaToken : '',
-        isLegacyUpgrade: isLegacyUpgradeMode
+        isLegacyUpgrade: isLegacyUpgradeMode,
+        sessionToken: (typeof localStorage !== 'undefined' ? localStorage.getItem('technova_session_token') : null) || ''
       });
 
       if (!res || !res.success) {

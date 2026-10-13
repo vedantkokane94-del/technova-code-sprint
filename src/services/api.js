@@ -485,9 +485,15 @@ export async function loginOrRegisterStudentApi(payload) {
 
 export async function startRegistrationApi(payload) {
   try {
+    const headers = { 'Content-Type': 'application/json' };
+    const token = payload.sessionToken || (typeof localStorage !== 'undefined' ? localStorage.getItem('technova_session_token') : null);
+    if (token) {
+      headers['x-student-session-token'] = token;
+      headers['Authorization'] = `Bearer ${token}`;
+    }
     const res = await fetch(apiUrl('/api/auth/register/start'), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify(payload)
     });
     const data = await res.json();

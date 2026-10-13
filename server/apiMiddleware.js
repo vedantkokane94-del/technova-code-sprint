@@ -2323,19 +2323,30 @@ export function createApiMiddleware() {
       // 7. Uniqueness enforcement: one account per verified/normalized email, one per mobile number, one per roll number
       store.students = store.students || [];
       const isLegacyUpgrade = Boolean(body.isLegacyUpgrade);
+      const activeStudent = resolveStudentFromToken();
+      const isAuthProfileUpdate = Boolean(
+        activeStudent &&
+        ((sanitized.prn && String(activeStudent.prn || '').trim().toUpperCase() === sanitized.prn) ||
+         activeStudent.uid === body.userId)
+      );
 
       for (const existing of store.students) {
         const existingPrn = String(existing.prn || '').trim().toUpperCase();
         const existingNormEmail =
           existing.normalizedEmail || normalizeEmail(existing.email || '') || '';
         const existingPhone = existing.phone ? normalizeIndianPhone(existing.phone) : '';
-        const isSameStudentRecord = existingPrn === sanitized.prn;
+        const isSameStudentRecord = Boolean(sanitized.prn) && existingPrn === sanitized.prn;
 
-        // Check duplicate normalized email across any other student record (or same record if already verified and not legacy upgrade)
+        // If this is the active student updating their own profile, skip duplicate checks against themselves
+        if (isAuthProfileUpdate && isSameStudentRecord) {
+          continue;
+        }
+
+        // Check duplicate normalized email across any other student record
         if (existingNormEmail && existingNormEmail === sanitized.normalizedEmail) {
           if (!isSameStudentRecord || (existing.emailVerified && !isLegacyUpgrade)) {
             return sendJson(409, {
-              error: 'An account with this email address is already registered. Only one account per student email is allowed.',
+              error: 'An account with this email address is already registered. Please sign in above.',
               fieldErrors: {
                 email: 'This email address is already registered (including Gmail dot/+alias variations).'
               }
@@ -2347,7 +2358,7 @@ export function createApiMiddleware() {
         if (existingPhone && existingPhone === sanitized.phone) {
           if (!isSameStudentRecord || (existing.phoneVerified && !isLegacyUpgrade)) {
             return sendJson(409, {
-              error: 'An account with this mobile number is already registered. Only one account per mobile number is allowed.',
+              error: 'An account with this mobile number is already registered. Please sign in above.',
               fieldErrors: {
                 phone: 'This mobile number (+91) is already linked to an existing registration.'
               }
@@ -2358,7 +2369,7 @@ export function createApiMiddleware() {
         // Check duplicate Roll Number
         if (isSameStudentRecord && !isLegacyUpgrade && existing.accountStatus !== 'unverified') {
           return sendJson(409, {
-            error: 'This College Roll Number is already registered. Please use Returning Student Login instead.',
+            error: 'This College Roll Number is already registered. Please use Returning Student Sign-In above.',
             fieldErrors: {
               prn: 'This College Roll Number is already registered.'
             }
@@ -2367,7 +2378,7 @@ export function createApiMiddleware() {
       }
 
       // 8. Create or update student record directly in store.students (Single-step registration without OTP)
-      const cleanPrnId = sanitized.prn.replace(/[^A-Z0-9]/gi, '').toUpperCase();
+      const cleanPrnId = (sanitized.prn || '').replace(/[^A-Z0-9]/gi, '').toUpperCase() || Math.random().toString(36).substring(2, 8).toUpperCase();
       const existingStuIdx = store.students.findIndex(
         s => String(s.prn || '').trim().toUpperCase() === sanitized.prn
       );

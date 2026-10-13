@@ -158,11 +158,12 @@ export function validateFullName(rawName) {
     return { valid: false, value: '', error: 'Full name is required.' };
   }
 
-  if (!/^[A-Za-z ]+$/.test(cleaned)) {
+  // Allow letters, dots, hyphens, apostrophes, and spaces (e.g. Rahul S. Patil, O'Connor)
+  if (!/^[A-Za-z. '-]+$/.test(cleaned)) {
     return {
       valid: false,
       value: cleaned,
-      error: 'Full name must contain letters and spaces only (no numbers or special characters).'
+      error: 'Full name must contain letters, spaces, or dots only.'
     };
   }
 
@@ -176,14 +177,15 @@ export function validateFullName(rawName) {
   }
 
   for (const w of words) {
-    if (w.length < 2) {
+    const lettersOnly = w.replace(/[^A-Za-z]/g, '');
+    if (lettersOnly.length < 1) {
       return {
         valid: false,
         value: cleaned,
-        error: 'Each part of your name must be at least 2 letters long.'
+        error: 'Each part of your name must contain letters.'
       };
     }
-    if (/(.)\1{3,}/i.test(w)) {
+    if (/(.)\1{3,}/i.test(lettersOnly)) {
       return {
         valid: false,
         value: cleaned,
@@ -192,11 +194,12 @@ export function validateFullName(rawName) {
     }
   }
 
-  if (cleaned.length < 4 || cleaned.length > 80) {
+  const totalLetters = cleaned.replace(/[^A-Za-z]/g, '').length;
+  if (totalLetters < 3 || cleaned.length > 80) {
     return {
       valid: false,
       value: cleaned,
-      error: 'Full name must be between 4 and 80 characters.'
+      error: 'Full name must be between 3 and 80 characters.'
     };
   }
 
@@ -307,13 +310,25 @@ export function validateEmailAddress(rawEmail, options = {}) {
   }
 
   // 3e. Reject repeated characters (e.g. aaaaa@gmail.com, 111111@gmail.com) or keyboard walks
-  if (/(.)\1{4,}/.test(localAlphaNum) || /^\d+$/.test(localAlphaNum)) {
+  const isEduDomain = domain.endsWith('.ac.in') || domain.endsWith('.edu') || domain.endsWith('.edu.in') || domain === 'svit.ac.in' || domain === 'pravara.in' || domain === 'unipune.ac.in';
+  if (/(.)\1{4,}/.test(localAlphaNum)) {
     return {
       valid: false,
       email: displayEmail,
       normalizedEmail: normalized,
       domain,
-      error: 'Please enter a genuine email address (repeated characters or numeric-only usernames are rejected).'
+      error: 'Please enter a genuine email address (repeated characters are rejected).'
+    };
+  }
+
+  // Purely numeric usernames under 4 digits are rejected for non-educational domains
+  if (/^\d+$/.test(localAlphaNum) && !isEduDomain && localAlphaNum.length < 4) {
+    return {
+      valid: false,
+      email: displayEmail,
+      normalizedEmail: normalized,
+      domain,
+      error: 'Numeric-only usernames must be at least 4 digits (e.g. roll number).'
     };
   }
 
@@ -465,15 +480,19 @@ export function validateIndianPhone(rawPhone) {
  * 5. Validate College Roll Number
  */
 export function validateRollNumber(rawPrn) {
-  const cleaned = String(rawPrn || '').trim().toUpperCase();
+  const cleaned = String(rawPrn || '')
+    .trim()
+    .replace(/\s+/g, '')
+    .toUpperCase();
+
   if (!cleaned) {
     return { valid: false, prn: '', error: 'College Roll Number is required.' };
   }
-  if (!/^[A-Z0-9-]{1,20}$/.test(cleaned)) {
+  if (!/^[A-Z0-9/_-]{1,30}$/.test(cleaned)) {
     return {
       valid: false,
       prn: cleaned,
-      error: 'Roll Number must contain only letters, numbers, or hyphens (e.g. 33 or 24CS089).'
+      error: 'Roll Number must contain only letters, numbers, hyphens, or slashes (e.g. 33, 24CS089, or 24/CS/089).'
     };
   }
   if (/^0+$/.test(cleaned) || /^(TEST|FAKE|DUMMY|ADMIN|NONE|NULL|ABC|XYZ)$/i.test(cleaned)) {
@@ -538,6 +557,8 @@ export function validateRegistrationPayload(payload = {}, options = {}) {
     emailDomain: emailCheck.domain,
     phone: phoneCheck.phone,
     phoneDigits: phoneCheck.digits,
+    prn: prnCheck.prn,
+    year,
     branch: normalizedBranch || rawBranch,
     branchCode: normalizedBranch || rawBranch,
     branchLabel: getBranchLabel(normalizedBranch || rawBranch),
